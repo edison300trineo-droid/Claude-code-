@@ -21,15 +21,20 @@ standard_curve:
   # 標準品名稱格式，第一點濃度最高
   name_pattern: "^STD(?P<index>\\d{2})$"
   # 各標準點的標稱濃度 (pg)。STD01 為最高點，最後一點視為 LLOQ。
+  # STD01 起一路 5 倍序列稀釋至 STD08（10000 / 5^7 = 0.128）。
   nominal_concentrations:
     STD01: 10000
-    STD02: 1000
-    STD03: 100
-    STD04: 10
-    STD05: 1
-    STD06: 0.5
-    STD07: 0.25
+    STD02: 2000
+    STD03: 400
+    STD04: 80
+    STD05: 16
+    STD06: 3.2
+    STD07: 0.64
     STD08: 0.128
+  # 設定檔標稱濃度與儀器實際輸出的相對容差。儀器以 float32 儲存，
+  # 3.2 會寫成 3.200000048，所以不能用完全相等比較。
+  # 超出此容差代表設定檔的稀釋序列填錯了，會在執行時提出警告。
+  nominal_tolerance: 0.001
   lloq_point: STD08          # 該 run 的 LLOQ 取這一點的濃度
   min_r_squared: 0.98
   efficiency_range: [85.0, 115.0]   # PCR 效率 (%)

@@ -105,6 +105,11 @@ class StudyConfig:
     def lloq_point(self) -> str:
         return str(self.standard_curve.get("lloq_point", "STD08"))
 
+    @property
+    def nominal_tolerance(self) -> float:
+        """設定檔標稱濃度與儀器實際輸出的相對容差。"""
+        return float(self.standard_curve.get("nominal_tolerance", 0.001))
+
     def timepoint_sort_key(self, timepoint: str) -> tuple[int, str]:
         """未列在 timepoint_order 的時間點排到最後，但仍穩定排序。"""
         order = self.timepoint_order

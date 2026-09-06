@@ -171,3 +171,60 @@ def test_matrix_control_is_recorded_without_a_recovery_verdict(config):
 )
 def test_lob_positive_requires_both_conditions(shown, quantity, expected, why):
     assert is_positive(shown, quantity, 0.51, "ND") is expected, why
+
+
+# --- 標稱濃度一致性檢查 -----------------------------------------------------
+
+def _standards_with(config, quantities: dict[str, float]) -> pd.DataFrame:
+    rows = []
+    for name, quantity in quantities.items():
+        for _ in range(2):
+            rows.append({
+                "sample_name": name, "task": "STANDARD",
+                "ct": 25.4 - 3.35 * math.log10(quantity), "quantity": quantity,
+            })
+    return annotate_wells(_wells(rows), config)
+
+
+def test_actual_five_fold_series_raises_no_complaint(config):
+    """實際的 5 倍序列稀釋，含儀器 float32 尾差，不該被誤判為填錯。"""
+    series = {
+        "STD01": 10000, "STD02": 2000, "STD03": 400, "STD04": 80,
+        "STD05": 16, "STD06": 3.200000048, "STD07": 0.639999986,
+        "STD08": 0.128000006,
+    }
+    curve = fit_standard_curve(_standards_with(config, series), "run.xls", config)
+    assert not any("標稱濃度與儀器實際輸出不一致" in note for note in curve.notes)
+    assert curve.accepted
+
+
+def test_wrong_dilution_series_in_config_is_flagged(config):
+    """設定檔誤填成 10 倍序列時，必須明講，不能靜默吃掉。"""
+    ten_fold = {
+        "STD01": 10000, "STD02": 1000, "STD03": 100, "STD04": 10,
+        "STD05": 1, "STD08": 0.128,
+    }
+    curve = fit_standard_curve(_standards_with(config, ten_fold), "run.xls", config)
+    mismatch = [n for n in curve.notes if "標稱濃度與儀器實際輸出不一致" in n]
+    assert mismatch, "設定檔序列與儀器不符時必須提出警告"
+    for point in ("STD02", "STD03", "STD04", "STD05"):
+        assert point in mismatch[0]
+    # STD01 與 STD08 兩端相符，不該被列入
+    assert "STD01" not in mismatch[0]
+    assert "STD08" not in mismatch[0]
+
+
+def test_curve_regression_uses_instrument_values_not_config(config):
+    """回歸取儀器 Quantity；設定檔填錯不該讓曲線跟著錯。"""
+    ten_fold = {
+        "STD01": 10000, "STD02": 1000, "STD03": 100, "STD04": 10, "STD08": 0.128,
+    }
+    curve = fit_standard_curve(_standards_with(config, ten_fold), "run.xls", config)
+    assert curve.slope == pytest.approx(-3.35, abs=1e-6)
+    assert curve.r_squared > 0.999
+
+
+def test_standard_point_missing_from_config_is_reported(config):
+    series = {"STD01": 10000, "STD02": 2000, "STD09": 0.0256, "STD08": 0.128000006}
+    curve = fit_standard_curve(_standards_with(config, series), "run.xls", config)
+    assert any("STD09" in note and "沒有這一點" in note for note in curve.notes)

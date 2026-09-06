@@ -16,9 +16,12 @@ SLOPE = -3.35
 INTERCEPT = 25.4
 TARGET = "new Alu probe+ABI supermix"
 
+# 實際為 STD01 起一路 5 倍序列稀釋。濃度刻意寫成儀器輸出的 float32 形式，
+# 讓 fixture 能驗證容差比較確實吸收得掉這種尾差。
 STD_CONC = {
-    "STD01": 10000, "STD02": 1000, "STD03": 100, "STD04": 10,
-    "STD05": 1, "STD06": 0.5, "STD07": 0.25, "STD08": 0.128,
+    "STD01": 10000, "STD02": 2000, "STD03": 400, "STD04": 80,
+    "STD05": 16, "STD06": 3.200000048, "STD07": 0.639999986,
+    "STD08": 0.128000006,
 }
 
 HEADER = [

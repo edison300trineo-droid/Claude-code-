@@ -61,6 +61,7 @@ def fit_standard_curve(wells: pd.DataFrame, source_file: str,
 
     lloq_point = config.lloq_point
     lloq = _lloq_for_run(subset, config, notes)
+    _check_nominal_concentrations(subset, config, notes)
 
     if len(points) < 3:
         notes.append("標準品有效孔位少於 3 點，無法回歸。")
@@ -106,6 +107,43 @@ def fit_standard_curve(wells: pd.DataFrame, source_file: str,
         efficiency_pass=eff_pass,
         notes=notes,
     )
+
+
+def _check_nominal_concentrations(standards: pd.DataFrame, config: StudyConfig,
+                                  notes: list[str]) -> None:
+    """比對設定檔的稀釋序列與儀器實際輸出的標稱濃度。
+
+    回歸本身用的是儀器的 Quantity 欄，所以序列填錯不會讓曲線算錯；但它會讓
+    LLOQ 的退回值、以及已知濃度回推 QC 的標稱值靜默地錯掉。這個檢查把那種
+    錯誤變成一則明確的警告，而不是等到有人核對報告時才發現。
+    """
+    tolerance = config.nominal_tolerance
+    mismatches: list[str] = []
+
+    for std_point, group in standards.groupby("std_point", dropna=True):
+        expected = config.nominal_concentration(str(std_point))
+        if expected is None:
+            notes.append(
+                f"標準點 {std_point} 出現在資料中，但設定檔的 nominal_concentrations "
+                "沒有這一點，請補上。"
+            )
+            continue
+        actual_values = group["quantity"].dropna()
+        if actual_values.empty:
+            continue
+        actual = float(actual_values.iloc[0])
+        scale = max(abs(expected), abs(actual), 1e-12)
+        if abs(actual - expected) / scale > tolerance:
+            mismatches.append(f"{std_point}（設定檔 {expected:g}，儀器 {actual:g}）")
+
+    if mismatches:
+        notes.append(
+            "設定檔的標準品標稱濃度與儀器實際輸出不一致："
+            + "、".join(mismatches)
+            + "。標準曲線回歸使用的是儀器數值，不受影響；但 LLOQ 退回值與"
+            "已知濃度回推 QC 會用到設定檔數值，請更正 config 的 "
+            "nominal_concentrations。"
+        )
 
 
 def _lloq_for_run(standards: pd.DataFrame, config: StudyConfig,
