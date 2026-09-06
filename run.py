@@ -14,6 +14,8 @@ import argparse
 import os
 import socket
 import sys
+import threading
+import webbrowser
 from datetime import date, timedelta
 
 from case_tracker import __version__, db, export, importer, models, report, server
@@ -48,7 +50,15 @@ def cmd_serve(args):
     print(f"  本機開啟：http://127.0.0.1:{args.port}/")
     if args.host in ("0.0.0.0", "::"):
         print(f"  同仁連線：{lan_hint(args.host, args.port)}")
-    print("  停止服務：Ctrl+C")
+        hostname = socket.gethostname()
+        if hostname:
+            # IP 可能隨網路重新分配而變動，電腦名稱通常比較穩定，適合當書籤。
+            print(f"  　或用　：http://{hostname}:{args.port}/")
+    print("  停止服務：關閉此視窗，或按 Ctrl+C")
+    if args.open:
+        threading.Timer(
+            1.0, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}/")
+        ).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -176,6 +186,7 @@ def build_parser():
     parser.add_argument("--host", default=DEFAULT_HOST, help="監聽位址（預設 0.0.0.0，供內網同仁連線）")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="監聽埠號（預設 8765）")
     parser.add_argument("--verbose", action="store_true", help="輸出每筆 HTTP 請求紀錄")
+    parser.add_argument("--open", action="store_true", help="啟動後自動開啟瀏覽器")
     parser.set_defaults(func=cmd_serve)
 
     sub = parser.add_subparsers(dest="command")

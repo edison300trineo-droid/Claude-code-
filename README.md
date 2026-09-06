@@ -10,6 +10,9 @@ BD 授權評估等案件的階段、里程碑、到期日與負責人追蹤。
 
 ---
 
+> **不熟悉程式的使用者請先看 [安裝說明.md](安裝說明.md)** ——
+> 從安裝 Python、下載程式到發網址給同仁，逐步圖文說明。
+
 ## 一、快速開始
 
 ```bash
@@ -31,7 +34,7 @@ python3 run.py seed-demo       # 想先看看畫面，可寫入 7 筆示範資�
 ### Windows
 
 1. 安裝 Python 3（python.org，安裝時勾選 *Add Python to PATH*）
-2. 連按 `start.bat`，或在資料夾開啟命令提示字元執行 `python run.py`
+2. 連按 `start.bat`（會自動開啟瀏覽器），或在資料夾執行 `python run.py --open`
 3. 首次啟動時 Windows 防火牆會詢問，選「允許私人網路存取」，同仁才連得進來
 
 ---
