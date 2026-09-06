@@ -7,6 +7,7 @@ from . import db, export, models
 REPORT_COLUMNS = [
     ("bucket", "分類"),
     ("case_no", "案件編號"),
+    ("study_no", "研究編號"),
     ("client", "客戶名稱"),
     ("case_type", "案件類型"),
     ("stage", "目前階段"),
@@ -17,7 +18,7 @@ REPORT_COLUMNS = [
     ("status", "狀態"),
 ]
 
-REPORT_WIDTHS = [12, 22, 22, 14, 16, 30, 12, 14, 12, 10]
+REPORT_WIDTHS = [12, 18, 18, 22, 14, 16, 30, 12, 14, 12, 10]
 
 
 def weekly_summary(conn, today=None, days=models.DUE_SOON_DAYS):
@@ -115,7 +116,8 @@ def to_text(summary):
             lines.append("　（無）")
         for case in cases:
             lines.append(
-                f"　{case['case_no']:<22} {case['due_date'] or '－':<12}"
+                f"　{case['case_no']:<12} {case['study_no'] or '－':<16}"
+                f" {case['due_date'] or '－':<12}"
                 f" {case['due_label']:<10} {case['owner'] or '未指派':<8}"
                 f" {case['client']}／{case['next_milestone'] or case['stage']}"
             )

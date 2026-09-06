@@ -22,7 +22,9 @@ TODAY = date(2026, 9, 6)
 
 def sample(**overrides):
     data = {
-        "case_no": "TN-VI1141101-R01",
+        "case_no": "QT114001",
+        "contract_no": "C-114-021",
+        "study_no": "TMT-114-003",
         "client": "宏碩生技",
         "case_type": "GLP 研究",
         "stage": "試驗執行中",
@@ -74,6 +76,106 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(clean, {"status": "已結案"})
 
 
+class CaseNoRuleTests(unittest.TestCase):
+    def test_prefix_required(self):
+        with self.assertRaises(models.ValidationError) as ctx:
+            models.validate(sample(case_no="TN-VI1141101-R01"))
+        self.assertIn("QT", ctx.exception.errors["case_no"])
+
+    def test_prefix_normalised_to_uppercase(self):
+        self.assertEqual(models.validate(sample(case_no="qt114001"))["case_no"], "QT114001")
+
+    def test_legacy_number_kept_when_unchanged(self):
+        clean = models.validate(
+            {"case_no": "TN-VI1141101-R01"}, partial=True,
+            existing_case_no="TN-VI1141101-R01",
+        )
+        self.assertEqual(clean["case_no"], "TN-VI1141101-R01")
+
+    def test_legacy_number_cannot_be_changed_to_another_legacy_one(self):
+        with self.assertRaises(models.ValidationError):
+            models.validate(
+                {"case_no": "TN-OTHER"}, partial=True,
+                existing_case_no="TN-VI1141101-R01",
+            )
+
+    def test_contract_and_study_numbers_are_free_text(self):
+        clean = models.validate(sample(contract_no="C-114-021 ", study_no="TMT-114-003"))
+        self.assertEqual(clean["contract_no"], "C-114-021")
+        self.assertEqual(clean["study_no"], "TMT-114-003")
+
+    def test_contract_and_study_numbers_may_be_blank(self):
+        clean = models.validate(sample(contract_no="", study_no=""))
+        self.assertEqual((clean["contract_no"], clean["study_no"]), ("", ""))
+
+
+class MigrationTests(unittest.TestCase):
+    """v1（無合約／研究編號）的資料庫要能就地升級，舊資料不受影響。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "legacy.db")
+        db.close_thread_connection()
+
+    def tearDown(self):
+        db.close_thread_connection()
+        self.tmp.cleanup()
+
+    def _build_v1(self):
+        import sqlite3
+        conn = sqlite3.connect(self.path)
+        conn.executescript(
+            """
+            CREATE TABLE cases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_no TEXT NOT NULL COLLATE NOCASE,
+                client TEXT NOT NULL DEFAULT '',
+                case_type TEXT NOT NULL, stage TEXT NOT NULL,
+                next_milestone TEXT NOT NULL DEFAULT '',
+                due_date TEXT NOT NULL DEFAULT '',
+                owner TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+                notes TEXT NOT NULL DEFAULT '', rev INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL, created_by TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL, updated_by TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE case_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, case_id INTEGER NOT NULL,
+                case_no TEXT NOT NULL, action TEXT NOT NULL,
+                field TEXT NOT NULL DEFAULT '', old_value TEXT NOT NULL DEFAULT '',
+                new_value TEXT NOT NULL DEFAULT '', operator TEXT NOT NULL DEFAULT '',
+                changed_at TEXT NOT NULL
+            );
+            INSERT INTO cases (case_no, client, case_type, stage, status,
+                               created_at, updated_at)
+            VALUES ('TN-VI1141101-R01', '宏碩生技', 'GLP 研究', '試驗執行中', '進行中',
+                    '2026-01-01T09:00:00', '2026-01-01T09:00:00');
+            PRAGMA user_version=1;
+            """
+        )
+        conn.commit()
+        conn.close()
+
+    def test_upgrade_adds_columns_and_keeps_rows(self):
+        self._build_v1()
+        db.configure(self.path)
+        conn = db.connect()
+        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(cases)")}
+        self.assertIn("contract_no", columns)
+        self.assertIn("study_no", columns)
+        legacy = db.get_by_case_no(conn, "TN-VI1141101-R01")
+        self.assertEqual(legacy["contract_no"], "")
+
+    def test_legacy_row_stays_editable(self):
+        self._build_v1()
+        db.configure(self.path)
+        conn = db.connect()
+        legacy = db.get_by_case_no(conn, "TN-VI1141101-R01")
+        updated = db.update_case(conn, legacy["id"], {"contract_no": "C-114-021"}, "測試員")
+        self.assertEqual(updated["contract_no"], "C-114-021")
+        self.assertEqual(updated["case_no"], "TN-VI1141101-R01")
+
+
 class DueStateTests(unittest.TestCase):
     def test_overdue(self):
         state, days, label = models.due_state("2026-09-01", "進行中", TODAY)
@@ -99,12 +201,12 @@ class CrudTests(TempDbTestCase):
         self.assertEqual(created["rev"], 1)
         self.assertEqual(created["created_by"], "測試員")
         fetched = db.get_case(self.conn, created["id"])
-        self.assertEqual(fetched["case_no"], "TN-VI1141101-R01")
+        self.assertEqual(fetched["case_no"], "QT114001")
 
     def test_duplicate_case_no_rejected_case_insensitively(self):
         db.create_case(self.conn, sample())
         with self.assertRaises(db.DuplicateCaseNo):
-            db.create_case(self.conn, sample(case_no="tn-vi1141101-r01"))
+            db.create_case(self.conn, sample(case_no="qt114001"))
 
     def test_update_bumps_rev_and_logs_history(self):
         created = db.create_case(self.conn, sample())
@@ -141,19 +243,19 @@ class CrudTests(TempDbTestCase):
 class QueryTests(TempDbTestCase):
     def setUp(self):
         super().setUp()
-        db.create_case(self.conn, sample(case_no="TN-A-01", client="宏碩生技", due_date="2026-09-01"))
+        db.create_case(self.conn, sample(case_no="QT114010", client="宏碩生技", due_date="2026-09-01"))
         db.create_case(
             self.conn,
-            sample(case_no="TN-B-02", client="光宇製藥", status="已結案",
+            sample(case_no="QT114011", client="光宇製藥", status="已結案",
                    case_type="稽核", due_date="2026-08-01"),
         )
         db.create_case(
             self.conn,
-            sample(case_no="TN-C-03", client="英傑生醫", due_date="", owner="林郁涵"),
+            sample(case_no="QT114012", client="英傑生醫", due_date="", owner="林郁涵"),
         )
 
     def test_search_matches_case_no_or_client(self):
-        self.assertEqual(len(db.list_cases(self.conn, {"q": "TN-B"})), 1)
+        self.assertEqual(len(db.list_cases(self.conn, {"q": "QT114011"})), 1)
         self.assertEqual(len(db.list_cases(self.conn, {"q": "光宇"})), 1)
 
     def test_status_and_type_filters(self):
@@ -163,18 +265,31 @@ class QueryTests(TempDbTestCase):
     def test_open_only_and_overdue_only(self):
         self.assertEqual(len(db.list_cases(self.conn, {"open_only": True})), 2)
         overdue = db.list_cases(self.conn, {"overdue_only": True}, today=TODAY)
-        self.assertEqual([c["case_no"] for c in overdue], ["TN-A-01"])
+        self.assertEqual([c["case_no"] for c in overdue], ["QT114010"])
 
     def test_default_order_puts_undated_and_closed_last(self):
         order = [c["case_no"] for c in db.list_cases(self.conn, {}, today=TODAY)]
-        self.assertEqual(order, ["TN-A-01", "TN-C-03", "TN-B-02"])
+        self.assertEqual(order, ["QT114010", "QT114012", "QT114011"])
 
     def test_explicit_sort(self):
         order = [
             c["case_no"]
             for c in db.list_cases(self.conn, {"sort": "case_no", "dir": "desc"})
         ]
-        self.assertEqual(order, ["TN-C-03", "TN-B-02", "TN-A-01"])
+        self.assertEqual(order, ["QT114012", "QT114011", "QT114010"])
+
+    def test_search_matches_contract_and_study_numbers(self):
+        self.assertEqual(len(db.list_cases(self.conn, {"q": "C-114-021"})), 3)
+        self.assertEqual(len(db.list_cases(self.conn, {"q": "TMT-114-003"})), 3)
+
+    def test_contract_filter_groups_one_contract(self):
+        db.update_case(self.conn, db.get_by_case_no(self.conn, "QT114011")["id"],
+                       {"contract_no": "C-114-099"})
+        self.assertEqual(len(db.list_cases(self.conn, {"contract_no": "C-114-099"})), 1)
+
+    def test_duplicate_contract_numbers_allowed(self):
+        rows = db.list_cases(self.conn, {"contract_no": "C-114-021"})
+        self.assertEqual(len(rows), 3)  # 一約多案
 
     def test_distinct_owners(self):
         self.assertIn("林郁涵", db.distinct_values(self.conn, "owner"))
@@ -184,29 +299,29 @@ class ReportTests(TempDbTestCase):
     def setUp(self):
         super().setUp()
         day = lambda n: (TODAY + timedelta(days=n)).isoformat()  # noqa: E731
-        db.create_case(self.conn, sample(case_no="TN-OVERDUE", due_date=day(-4)))
-        db.create_case(self.conn, sample(case_no="TN-SOON", due_date=day(3)))
-        db.create_case(self.conn, sample(case_no="TN-LATER", due_date=day(30)))
-        db.create_case(self.conn, sample(case_no="TN-NODATE", due_date=""))
-        db.create_case(self.conn, sample(case_no="TN-DONE", due_date=day(-9), status="已結案"))
+        db.create_case(self.conn, sample(case_no="QT114020", due_date=day(-4)))
+        db.create_case(self.conn, sample(case_no="QT114021", due_date=day(3)))
+        db.create_case(self.conn, sample(case_no="QT114022", due_date=day(30)))
+        db.create_case(self.conn, sample(case_no="QT114023", due_date=""))
+        db.create_case(self.conn, sample(case_no="QT114024", due_date=day(-9), status="已結案"))
 
     def test_buckets(self):
         summary = report.weekly_summary(self.conn, TODAY, 7)
-        self.assertEqual([c["case_no"] for c in summary["overdue"]], ["TN-OVERDUE"])
-        self.assertEqual([c["case_no"] for c in summary["upcoming"]], ["TN-SOON"])
-        self.assertEqual([c["case_no"] for c in summary["undated"]], ["TN-NODATE"])
+        self.assertEqual([c["case_no"] for c in summary["overdue"]], ["QT114020"])
+        self.assertEqual([c["case_no"] for c in summary["upcoming"]], ["QT114021"])
+        self.assertEqual([c["case_no"] for c in summary["undated"]], ["QT114023"])
         self.assertEqual(summary["totals"]["active"], 4)
 
     def test_wider_window_includes_more(self):
         summary = report.weekly_summary(self.conn, TODAY, 30)
         self.assertEqual(
-            [c["case_no"] for c in summary["upcoming"]], ["TN-SOON", "TN-LATER"]
+            [c["case_no"] for c in summary["upcoming"]], ["QT114021", "QT114022"]
         )
 
     def test_text_and_exports(self):
         summary = report.weekly_summary(self.conn, TODAY, 7)
         text = report.to_text(summary)
-        self.assertIn("TN-OVERDUE", text)
+        self.assertIn("QT114020", text)
         self.assertIn("已逾期", text)
         self.assertTrue(report.to_csv(summary).startswith(b"\xef\xbb\xbf"))
         self.assertTrue(report.to_xlsx(summary).startswith(b"PK"))
@@ -214,14 +329,15 @@ class ReportTests(TempDbTestCase):
 
 class ExportTests(unittest.TestCase):
     def setUp(self):
-        self.items = [models.decorate(sample(), TODAY), models.decorate(sample(case_no="TN-B", notes="含 < > & 特殊字元"), TODAY)]
+        self.items = [models.decorate(sample(), TODAY), models.decorate(sample(case_no="QT114002", notes="含 < > & 特殊字元"), TODAY)]
 
     def test_csv_has_bom_and_headers(self):
         raw = export.to_csv(self.items)
         self.assertTrue(raw.startswith(b"\xef\xbb\xbf"))
         text = raw.decode("utf-8-sig")
-        self.assertTrue(text.startswith("案件編號,客戶名稱"))
-        self.assertIn("TN-VI1141101-R01", text)
+        self.assertTrue(text.startswith("案件編號,合約編號,研究編號,客戶名稱"))
+        self.assertIn("QT114001", text)
+        self.assertIn("TMT-114-003", text)
 
     def test_xlsx_structure(self):
         raw = export.to_xlsx(self.items)
@@ -267,32 +383,34 @@ class ImportTests(TempDbTestCase):
 
     def test_import_chinese_headers(self):
         path = self._write(
-            "案件編號,客戶名稱,案件類型,目前階段,到期日,負責人,狀態\r\n"
-            "TN-IMP-01,宏碩生技,GLP 研究,試驗執行中,2026/9/20,陳彥廷,進行中\r\n"
-            "TN-IMP-02,光宇製藥,稽核,QA 審查,20261001,王孟儒,需留意\r\n"
+            "案件編號,合約編號,研究編號,客戶名稱,案件類型,目前階段,到期日,負責人,狀態\r\n"
+            "QT114031,C-114-021,TMT-114-003,宏碩生技,GLP 研究,試驗執行中,2026/9/20,陳彥廷,進行中\r\n"
+            "QT114032,C-114-021,,光宇製藥,稽核,QA 審查,20261001,王孟儒,需留意\r\n"
         )
         created, updated, errors = importer.import_csv(self.conn, path)
         self.assertEqual((created, updated, errors), (2, 0, []))
-        row = db.get_by_case_no(self.conn, "TN-IMP-01")
+        row = db.get_by_case_no(self.conn, "QT114031")
         self.assertEqual(row["due_date"], "2026-09-20")
-        self.assertEqual(db.get_by_case_no(self.conn, "TN-IMP-02")["due_date"], "2026-10-01")
+        self.assertEqual(row["contract_no"], "C-114-021")
+        self.assertEqual(row["study_no"], "TMT-114-003")
+        self.assertEqual(db.get_by_case_no(self.conn, "QT114032")["due_date"], "2026-10-01")
 
     def test_reimport_updates_existing(self):
-        path = self._write("案件編號,負責人\r\nTN-IMP-01,甲\r\n")
+        path = self._write("案件編號,負責人\r\nQT114031,甲\r\n")
         importer.import_csv(self.conn, path)
-        path2 = self._write("案件編號,負責人\r\nTN-IMP-01,乙\r\n")
+        path2 = self._write("案件編號,負責人\r\nQT114031,乙\r\n")
         created, updated, errors = importer.import_csv(self.conn, path2)
         self.assertEqual((created, updated), (0, 1))
-        self.assertEqual(db.get_by_case_no(self.conn, "TN-IMP-01")["owner"], "乙")
+        self.assertEqual(db.get_by_case_no(self.conn, "QT114031")["owner"], "乙")
 
     def test_bad_rows_are_reported_not_fatal(self):
         path = self._write(
-            "案件編號,案件類型\r\nTN-OK,稽核\r\nTN-BAD,不存在的類型\r\n"
+            "案件編號,案件類型\r\nQT114041,稽核\r\nQT114042,不存在的類型\r\n"
         )
         created, _, errors = importer.import_csv(self.conn, path)
         self.assertEqual(created, 1)
         self.assertEqual(len(errors), 1)
-        self.assertIn("TN-BAD", errors[0])
+        self.assertIn("QT114042", errors[0])
 
     def test_missing_case_no_column(self):
         path = self._write("客戶名稱\r\n宏碩生技\r\n")
@@ -358,7 +476,7 @@ class ApiTests(TempDbTestCase):
         self.assertEqual(created["created_by"], "測試員")
         case_id = created["id"]
 
-        status, listing = self.json_request("GET", "/api/cases?q=TN-VI")
+        status, listing = self.json_request("GET", "/api/cases?q=QT1140")
         self.assertEqual(listing["count"], 1)
 
         status, updated = self.json_request(

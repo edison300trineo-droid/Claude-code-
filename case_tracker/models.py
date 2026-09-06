@@ -31,9 +31,14 @@ CLOSED_STATUS = "已結案"
 # 到期日在幾天內視為「即將到期」。
 DUE_SOON_DAYS = 7
 
+# 案件編號（報價／委託案號）一律以此開頭；研究編號與合約編號則不限格式。
+CASE_NO_PREFIX = "QT"
+
 # 可編輯欄位 -> 中文標籤（同時作為匯出欄位順序）。
 FIELD_LABELS = [
     ("case_no", "案件編號"),
+    ("contract_no", "合約編號"),
+    ("study_no", "研究編號"),
     ("client", "客戶名稱"),
     ("case_type", "案件類型"),
     ("stage", "目前階段"),
@@ -46,7 +51,7 @@ FIELD_LABELS = [
 
 EDITABLE_FIELDS = [name for name, _ in FIELD_LABELS]
 
-EXPORT_COLUMNS = FIELD_LABELS[:8] + [
+EXPORT_COLUMNS = FIELD_LABELS[:10] + [
     ("due_label", "期限狀態"),
     ("notes", "備註"),
     ("updated_at", "最後更新"),
@@ -55,6 +60,8 @@ EXPORT_COLUMNS = FIELD_LABELS[:8] + [
 
 MAX_LEN = {
     "case_no": 64,
+    "contract_no": 64,
+    "study_no": 64,
     "client": 120,
     "next_milestone": 200,
     "owner": 60,
@@ -80,8 +87,12 @@ def parse_date(value):
     return datetime.strptime(value, "%Y-%m-%d").date()
 
 
-def validate(payload, partial=False):
-    """驗證並正規化案件資料，回傳只含合法欄位的 dict。"""
+def validate(payload, partial=False, existing_case_no=None):
+    """驗證並正規化案件資料，回傳只含合法欄位的 dict。
+
+    existing_case_no 為該筆資料原本的案件編號；編號沒被改動時不再檢查
+    QT 前綴，既有的舊編號才不會因為新規則而無法編輯。
+    """
     errors = {}
     clean = {}
 
@@ -92,10 +103,15 @@ def validate(payload, partial=False):
         value = "" if raw is None else str(raw).strip()
 
         if field == "case_no":
+            unchanged = bool(existing_case_no) and value.lower() == existing_case_no.lower()
             if not value:
                 errors[field] = "案件編號為必填"
             elif len(value) > MAX_LEN[field]:
                 errors[field] = f"案件編號不可超過 {MAX_LEN[field]} 字"
+            elif value[: len(CASE_NO_PREFIX)].upper() == CASE_NO_PREFIX:
+                value = CASE_NO_PREFIX + value[len(CASE_NO_PREFIX):]  # 前綴統一大寫
+            elif not unchanged:
+                errors[field] = f"案件編號須以 {CASE_NO_PREFIX} 開頭（例：{CASE_NO_PREFIX}114001）"
         elif field == "case_type":
             if value not in CASE_TYPES:
                 errors[field] = "案件類型不在允許清單中"

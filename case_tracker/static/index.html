@@ -28,7 +28,7 @@
   <div class="toolbar-line">
     <label class="field search">
       <span>搜尋</span>
-      <input id="search" type="search" placeholder="案件編號或客戶名稱" autocomplete="off">
+      <input id="search" type="search" placeholder="案件編號／合約編號／研究編號／客戶" autocomplete="off">
     </label>
     <label class="field"><span>狀態</span><select id="filter-status"></select></label>
     <label class="field"><span>類型</span><select id="filter-type"></select></label>
@@ -55,6 +55,8 @@
       <thead>
         <tr>
           <th class="col-no sortable" data-sort="case_no">案件編號</th>
+          <th class="col-no2 sortable" data-sort="contract_no">合約編號</th>
+          <th class="col-no2 sortable" data-sort="study_no">研究編號</th>
           <th class="sortable" data-sort="client">客戶名稱</th>
           <th class="sortable" data-sort="case_type">類型</th>
           <th class="sortable" data-sort="stage">目前階段</th>
@@ -86,10 +88,17 @@
     </div>
     <form id="case-form" class="form-grid" autocomplete="off">
       <label class="f-half"><span class="lbl">案件編號 <span class="req">*</span></span>
-        <input name="case_no" class="mono" required maxlength="64" placeholder="TN-VI1141101-R01">
+        <input name="case_no" class="mono" required maxlength="64" placeholder="QT114001">
       </label>
       <label class="f-half">客戶名稱
         <input name="client" maxlength="120" list="client-list">
+      </label>
+      <label class="f-half">合約編號
+        <input name="contract_no" class="mono" maxlength="64" list="contract-list"
+               placeholder="尚未簽約可留空">
+      </label>
+      <label class="f-half">研究編號
+        <input name="study_no" class="mono" maxlength="64" placeholder="TMT…（尚未立案可留空）">
       </label>
       <label class="f-half">案件類型
         <select name="case_type"></select>
@@ -147,6 +156,7 @@
 </div>
 
 <datalist id="owner-list"></datalist>
+<datalist id="contract-list"></datalist>
 <datalist id="client-list"></datalist>
 
 <script src="/app.js"></script>

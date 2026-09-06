@@ -206,6 +206,7 @@ class Handler(BaseHTTPRequestHandler):
                     "field_labels": dict(models.FIELD_LABELS),
                     "owners": db.distinct_values(conn, "owner"),
                     "clients": db.distinct_values(conn, "client"),
+                    "contracts": db.distinct_values(conn, "contract_no"),
                     "status_counts": db.counts_by_status(conn),
                 }
             )

@@ -13,7 +13,7 @@ from datetime import datetime
 
 from . import models
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _local = threading.local()
 _db_path = None
@@ -79,6 +79,8 @@ def init_schema(conn):
             CREATE TABLE IF NOT EXISTS cases (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
                 case_no        TEXT NOT NULL COLLATE NOCASE,
+                contract_no    TEXT NOT NULL DEFAULT '',
+                study_no       TEXT NOT NULL DEFAULT '',
                 client         TEXT NOT NULL DEFAULT '',
                 case_type      TEXT NOT NULL,
                 stage          TEXT NOT NULL,
@@ -112,7 +114,24 @@ def init_schema(conn):
             CREATE INDEX IF NOT EXISTS idx_history_case ON case_history(case_id);
             """
         )
+        _migrate(conn)
         conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+
+
+def _migrate(conn):
+    """為既有資料庫補上後來新增的欄位（v1 -> v2：合約編號、研究編號）。"""
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(cases)")}
+    for column in ("contract_no", "study_no"):
+        if column not in existing:
+            conn.execute(
+                f"ALTER TABLE cases ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
+            )
+    conn.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_cases_contract ON cases(contract_no);
+        CREATE INDEX IF NOT EXISTS idx_cases_study ON cases(study_no);
+        """
+    )
 
 
 # --------------------------------------------------------------------------
@@ -121,6 +140,8 @@ def init_schema(conn):
 
 SORT_COLUMNS = {
     "case_no": "case_no",
+    "contract_no": "contract_no",
+    "study_no": "study_no",
     "client": "client",
     "case_type": "case_type",
     "stage": "stage",
@@ -153,11 +174,19 @@ def _build_filters(filters):
         where.append("owner = ?")
         params.append(owner)
 
+    contract_no = (filters.get("contract_no") or "").strip()
+    if contract_no:
+        where.append("contract_no = ?")
+        params.append(contract_no)
+
     query = (filters.get("q") or "").strip()
     if query:
         like = f"%{query}%"
-        where.append("(case_no LIKE ? OR client LIKE ?)")
-        params.extend([like, like])
+        where.append(
+            "(case_no LIKE ? OR contract_no LIKE ? OR study_no LIKE ?"
+            " OR client LIKE ?)"
+        )
+        params.extend([like] * 4)
 
     if filters.get("open_only"):
         where.append("status <> ?")
@@ -215,7 +244,7 @@ def get_by_case_no(conn, case_no, today=None):
 
 
 def distinct_values(conn, column):
-    if column not in ("owner", "client"):
+    if column not in ("owner", "client", "contract_no"):
         raise ValueError(f"不支援的欄位：{column}")
     rows = conn.execute(
         f"SELECT DISTINCT {column} AS v FROM cases WHERE {column} <> '' ORDER BY {column}"
@@ -252,12 +281,13 @@ def create_case(conn, payload, operator=""):
         if exists:
             raise DuplicateCaseNo(f"案件編號 {data['case_no']} 已存在")
         cursor = conn.execute(
-            "INSERT INTO cases (case_no, client, case_type, stage, next_milestone,"
-            " due_date, owner, status, notes, rev, created_at, created_by,"
-            " updated_at, updated_by)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
+            "INSERT INTO cases (case_no, contract_no, study_no, client, case_type,"
+            " stage, next_milestone, due_date, owner, status, notes, rev,"
+            " created_at, created_by, updated_at, updated_by)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
             (
-                data["case_no"], data["client"], data["case_type"], data["stage"],
+                data["case_no"], data["contract_no"], data["study_no"],
+                data["client"], data["case_type"], data["stage"],
                 data["next_milestone"], data["due_date"], data["owner"],
                 data["status"], data["notes"], stamp, operator, stamp, operator,
             ),
@@ -268,12 +298,12 @@ def create_case(conn, payload, operator=""):
 
 
 def update_case(conn, case_id, payload, operator="", expected_rev=None):
-    data = models.validate(payload, partial=True)
     stamp = now_stamp()
     with _write_lock, conn:
         row = conn.execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
         if row is None:
             raise NotFound(f"查無案件 id={case_id}")
+        data = models.validate(payload, partial=True, existing_case_no=row["case_no"])
         if expected_rev is not None and int(expected_rev) != row["rev"]:
             raise ConflictError(
                 f"此案件已由 {row['updated_by'] or '他人'} 於 {row['updated_at']} 更新，請重新載入後再編輯"

@@ -26,6 +26,12 @@ HEADER_MAP.update(
         "主持人": "owner",
         "負責": "owner",
         "說明": "notes",
+        "合約號": "contract_no",
+        "契約編號": "contract_no",
+        "合約": "contract_no",
+        "研究編號": "study_no",
+        "試驗編號": "study_no",
+        "研究號": "study_no",
     }
 )
 

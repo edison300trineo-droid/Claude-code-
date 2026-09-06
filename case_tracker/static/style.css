@@ -167,7 +167,7 @@ main {
   background: var(--panel);
 }
 
-table { border-collapse: collapse; width: 100%; min-width: 1180px; }
+table { border-collapse: collapse; width: 100%; min-width: 1420px; }
 
 thead th {
   position: sticky;
@@ -197,7 +197,8 @@ tbody td {
 tbody tr:nth-child(even) { background: rgba(0, 0, 0, 0.015); }
 tbody tr:hover { background: #eeece3; }
 
-.col-no { width: 168px; }
+.col-no { width: 132px; }
+.col-no2 { width: 132px; }
 .col-date { width: 104px; }
 .col-due { width: 92px; }
 .col-notes { width: 220px; }
@@ -205,6 +206,7 @@ tbody tr:hover { background: #eeece3; }
 
 td.case-no { font-family: var(--mono); white-space: nowrap; }
 td.date { font-family: var(--mono); white-space: nowrap; }
+td.soft { color: var(--ink-soft); }
 td.notes {
   color: var(--ink-soft);
   max-width: 240px;

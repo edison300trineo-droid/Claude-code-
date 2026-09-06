@@ -16,6 +16,9 @@ const state = {
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
+const FORM_FIELDS = ['case_no', 'contract_no', 'study_no', 'client', 'case_type',
+  'stage', 'next_milestone', 'due_date', 'owner', 'status', 'notes'];
+
 const STATUS_CLASS = {
   '進行中': 's-ongoing',
   '需留意': 's-watch',
@@ -115,6 +118,8 @@ async function loadMeta() {
 
   $('#owner-list').innerHTML = state.meta.owners
     .map((o) => `<option value="${escapeAttr(o)}">`).join('');
+  $('#contract-list').innerHTML = (state.meta.contracts || [])
+    .map((c) => `<option value="${escapeAttr(c)}">`).join('');
   $('#client-list').innerHTML = state.meta.clients
     .map((c) => `<option value="${escapeAttr(c)}">`).join('');
 }
@@ -159,11 +164,13 @@ function dueCell(item) {
 function render() {
   const tbody = $('#rows');
   if (!state.items.length) {
-    tbody.innerHTML = '<tr><td colspan="11" class="empty">沒有符合條件的案件</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="13" class="empty">沒有符合條件的案件</td></tr>';
   } else {
     tbody.innerHTML = state.items.map((item) => `
       <tr class="${rowClass(item)}" data-id="${item.id}">
         <td class="case-no">${escapeHtml(item.case_no)}</td>
+        <td class="case-no soft">${escapeHtml(item.contract_no) || '—'}</td>
+        <td class="case-no">${escapeHtml(item.study_no) || '—'}</td>
         <td>${escapeHtml(item.client)}</td>
         <td>${escapeHtml(item.case_type)}</td>
         <td class="stage-cell"><span class="stage-idx">${stageIndex(item.stage)}</span>${escapeHtml(item.stage)}</td>
@@ -236,8 +243,7 @@ function openCaseForm(item) {
     stage: state.meta.stages[0],
     status: state.meta.statuses[0],
   };
-  ['case_no', 'client', 'case_type', 'stage', 'next_milestone', 'due_date',
-    'owner', 'status', 'notes'].forEach((name) => {
+  FORM_FIELDS.forEach((name) => {
     const field = form.elements[name];
     if (field) field.value = values[name] || '';
   });
@@ -250,8 +256,7 @@ async function submitCase(event) {
   event.preventDefault();
   const form = event.target;
   const payload = {};
-  ['case_no', 'client', 'case_type', 'stage', 'next_milestone', 'due_date',
-    'owner', 'status', 'notes'].forEach((name) => {
+  FORM_FIELDS.forEach((name) => {
     payload[name] = form.elements[name].value;
   });
 
@@ -297,13 +302,14 @@ function reportTable(cases) {
   if (!cases.length) return '<div class="empty">（無）</div>';
   return `<table>
     <thead><tr>
-      <th class="col-no">案件編號</th><th>客戶名稱</th><th>類型</th>
+      <th class="col-no">案件編號</th><th class="col-no2">研究編號</th><th>客戶名稱</th><th>類型</th>
       <th>下一個里程碑</th><th class="col-date">到期日</th><th class="col-due">期限</th>
       <th>負責人</th><th>狀態</th>
     </tr></thead>
     <tbody>${cases.map((c) => `
       <tr class="${rowClass(c)}">
         <td class="case-no">${escapeHtml(c.case_no)}</td>
+        <td class="case-no">${escapeHtml(c.study_no) || '—'}</td>
         <td>${escapeHtml(c.client)}</td>
         <td>${escapeHtml(c.case_type)}</td>
         <td>${escapeHtml(c.next_milestone || c.stage)}</td>
