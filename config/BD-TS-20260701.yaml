@@ -1,0 +1,151 @@
+# ---------------------------------------------------------------------------
+# 研究設定檔 — BD-TS-20260701 ELIXCYTE Alu qPCR 生物分布
+#
+# 這個檔案是「規則」的唯一來源。要改允收標準、LOB 倍數、臟器代碼，改這裡，
+# 不要改程式碼，也不要手改產出的統整表。
+# ---------------------------------------------------------------------------
+
+study_id: BD-TS-20260701
+study_title: ELIXCYTE qPCR (Alu 序列) 生物分布數據統整表
+unit: "pg human DNA / 10 ng gDNA"
+
+paths:
+  # 相對於本設定檔所在資料夾；也可以填絕對路徑 (例如 NAS 的 UNC 路徑)。
+  raw_dir: "../data/raw"            # StepOnePlus export (.xls) 與參考檔案放這裡
+  reference_dir: "../data/reference" # 動物分組/性別/上機編號等參考檔
+  decisions_file: "../data/decisions.xlsx"  # 同仁填寫的人工決策表 (唯一可手動編輯的檔案)
+  output_dir: "../output"           # 產出的統整表與 manifest
+
+# --- 標準曲線允收標準 (SHGLP-SOP-GE-001-F02 Rev.01) --------------------------
+standard_curve:
+  # 標準品名稱格式，第一點濃度最高
+  name_pattern: "^STD(?P<index>\\d{2})$"
+  # 各標準點的標稱濃度 (pg)。STD01 為最高點，最後一點視為 LLOQ。
+  nominal_concentrations:
+    STD01: 10000
+    STD02: 1000
+    STD03: 100
+    STD04: 10
+    STD05: 1
+    STD06: 0.5
+    STD07: 0.25
+    STD08: 0.128
+  lloq_point: STD08          # 該 run 的 LLOQ 取這一點的濃度
+  min_r_squared: 0.98
+  efficiency_range: [85.0, 115.0]   # PCR 效率 (%)
+
+# --- QC 允收標準 -----------------------------------------------------------
+qc:
+  # 回收率判定「只」以敏感度對照組為準 (依 EC 指示)
+  sensitivity_control:
+    # 由樣品名稱解析標稱濃度，例如 "200pg sensitivity control"
+    name_pattern: "(?P<conc>\\d+(?:\\.\\d+)?)\\s*pg"
+    recovery_range: [80.0, 120.0]
+  # 已知濃度回推 QC (STD07/STD08 以 UNKNOWN task 重跑) — 保留原始資料，不納入判定
+  std_accuracy_check:
+    include_in_qc_sheet: false
+  # 臟器基質 QC 對照組，例如 "27 mouse blood cell pellet DNA"
+  matrix_control:
+    name_pattern: "^(?P<organ_code>\\d{2})\\s+mouse\\s+.*DNA$"
+  # NTC：Alu 為高敏感度方法，微量背景屬正常；只有回推濃度 >= 該 run LLOQ 才判異常
+  ntc:
+    names: ["NTC"]
+    abnormal_if_quantity_gte_lloq: true
+
+# --- 檢體命名規則 ----------------------------------------------------------
+sample:
+  # 動物檢體：<動物編號>_<臟器代碼>，例如 1006_99
+  animal_pattern: "^(?P<animal>\\d{4})[_-](?P<organ_code>\\d{2})(?P<suffix>.*)$"
+  # 判定為 rerun 的名稱後綴 (不分大小寫)。留空則只靠「同一 key 出現在較晚的 run」判定。
+  rerun_suffixes: ["_re", "_rerun", "-re", "-r", " re", "_2", "-2"]
+  # 同一 動物_臟器 出現在多個 run 時，以 Run 結束時間較晚者為 rerun 並預設為最終採用。
+  later_run_is_rerun: true
+
+# --- ND / HIGHSD 判定規則 --------------------------------------------------
+reporting:
+  nd_label: "ND"
+  # Quantity Mean < 該 run LLOQ 即標示 ND；原始測得值不覆蓋，另存一欄
+  nd_below_lloq: true
+  highsd:
+    # 最終採用列仍為 HIGHSD=Y 且無 rerun 時的處理
+    quantifiable_action: "manual_review"   # 需人工複核 (淺紅底)
+    nd_action: "expected"                  # ND 時視為預期現象 (淺綠底)
+
+# --- 血液 (27) LOB 校正 ----------------------------------------------------
+lob:
+  enabled: true
+  organ_code: "27"
+  # 主要依據：Predose 動物血液「孔位層級」數值
+  source: predose_wells
+  baseline_timepoint: "Predose"
+  primary_multiplier: 1.645     # LOB = Mean + k*SD，本次分析採用值
+  reference_multiplier: 2.0     # 僅供參考比較
+  min_n: 20                     # 低於此筆數會在報表加註提醒
+  # 判為陽性需同時通過：非 ND 且 >= LOB
+  positive_requires_non_nd: true
+  # Predose 本身為 LOB 定義組，濃度/陽性隻數欄位標示為 "-"
+  exclude_baseline_from_stats: true
+
+# --- Mean±SD 彙整報表 ------------------------------------------------------
+summary:
+  # 只納入可定量 (非 ND) 數值；ND 檢體數記於 Remarks，不以任何值代入估算
+  include_nd_in_stats: false
+  report_cv: false
+  timepoint_order:
+    - Predose
+    - 1h
+    - Day 2
+    - Day 8
+    - Day 15
+    - Day 22
+    - Day 29
+    - Day 43
+    - Day 57
+    - Day 70
+  # 交付子集：只輸出這些臟器 (留空 = 全部)
+  delivery_subsets:
+    "8-31 交付":
+      organ_codes: ["03", "22", "23", "64", "99"]
+      note: "血液(27)需另行套用 LOB 校正後判讀，不含於本子集"
+
+# --- 繪圖用資料 ------------------------------------------------------------
+dot_plot:
+  organ_codes: ["99"]
+  # ND 於繪圖時代入的值 (僅供繪圖，不影響統計)
+  nd_plot_substitute: "lloq/2"
+
+# --- 組別判定 (依計畫書 Table.1) -------------------------------------------
+groups:
+  # 時間點 -> 組別。同一時間點對應多組時判定為「待確認」，需由決策表指定。
+  "Group 1 (Control)": ["Day 29"]
+  "Group 2 (Test Item)":
+    - Predose
+    - 1h
+    - Day 2
+    - Day 8
+    - Day 15
+    - Day 22
+    - Day 29
+    - Day 43
+    - Day 57
+    - Day 70
+  ambiguous_label: "待確認"
+
+# --- 臟器代碼對照表 (官方「上機編號_說明.xlsx」) ---------------------------
+organ_codes:
+  "01": {en: "Adrenal gland", zh: "腎上腺"}
+  "03": {en: "Bone marrow",   zh: "骨髓pellet"}
+  "04": {en: "Brain",         zh: "腦"}
+  "11": {en: "Ovaries",       zh: "卵巢"}
+  "19": {en: "Liver",         zh: "肝"}
+  "21": {en: "Heart",         zh: "心"}
+  "22": {en: "Spleen",        zh: "脾"}
+  "23": {en: "Lung",          zh: "肺"}
+  "24": {en: "Kidney",        zh: "腎"}
+  "25": {en: "Testis",        zh: "睪丸"}
+  "27": {en: "Blood",         zh: "血液pellet"}
+  "61": {en: "Cervical",      zh: "頸椎"}
+  "62": {en: "Lumber",        zh: "腰椎"}
+  "63": {en: "Thoracic",      zh: "胸椎"}
+  "64": {en: "Lymph node",    zh: "淋巴結"}
+  "99": {en: "Injection site", zh: "注射處關節"}
