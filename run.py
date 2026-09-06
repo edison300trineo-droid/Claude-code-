@@ -5,8 +5,8 @@
     python3 run.py                       # 啟動伺服器（預設 http://0.0.0.0:8765）
     python3 run.py --port 9000           # 指定埠號
     python3 run.py report --days 14      # 在終端機列印到期／逾期摘要
-    python3 run.py export 台帳.xlsx       # 匯出整份台帳（.xlsx 或 .csv）
-    python3 run.py import 既有台帳.csv     # 由現有試算表匯入（CSV UTF-8）
+    python3 run.py export 案件清單.xlsx    # 匯出全部案件（.xlsx 或 .csv）
+    python3 run.py import 既有清單.csv     # 由現有試算表匯入（CSV UTF-8）
     python3 run.py seed-demo             # 寫入示範資料（僅限空資料庫）
 """
 
@@ -45,7 +45,7 @@ def lan_hint(host, port):
 def cmd_serve(args):
     path = db.configure(args.db)
     httpd = server.serve(args.host, args.port, verbose=args.verbose)
-    print(f"案件追蹤台帳 v{__version__}")
+    print(f"案件追蹤系統 v{__version__}")
     print(f"  資料庫　：{path}")
     print(f"  本機開啟：http://127.0.0.1:{args.port}/")
     if args.host in ("0.0.0.0", "::"):
@@ -199,7 +199,7 @@ def build_parser():
     p_report.add_argument("-o", "--output", help="輸出檔案（.txt / .csv / .xlsx）")
     p_report.set_defaults(func=cmd_report)
 
-    p_export = sub.add_parser("export", help="匯出整份台帳")
+    p_export = sub.add_parser("export", help="匯出全部案件")
     p_export.add_argument("output", help="輸出檔名（.xlsx 或 .csv）")
     p_export.add_argument("--open-only", action="store_true", help="只匯出未結案案件")
     p_export.set_defaults(func=cmd_export)

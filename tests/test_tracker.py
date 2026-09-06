@@ -455,7 +455,7 @@ class ApiTests(TempDbTestCase):
     def test_index_and_static_are_served(self):
         status, body, headers = self.request("GET", "/")
         self.assertEqual(status, 200)
-        self.assertIn("案件追蹤台帳", body.decode("utf-8"))
+        self.assertIn("案件追蹤系統", body.decode("utf-8"))
         self.assertIn("text/html", headers["Content-Type"])
         self.assertEqual(self.request("GET", "/app.js")[0], 200)
         self.assertEqual(self.request("GET", "/style.css")[0], 200)

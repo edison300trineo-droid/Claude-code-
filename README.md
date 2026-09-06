@@ -1,11 +1,11 @@
 # 案件／專案追蹤系統（Trifecta MedTek）
 
-臨床前 CRO 的案件台帳：GLP 研究、方法確效、生物分析、稽核、外包試驗支援、
+臨床前 CRO 的案件追蹤系統：GLP 研究、方法確效、生物分析、稽核、外包試驗支援、
 BD 授權評估等案件的階段、里程碑、到期日與負責人追蹤。
 
 - **後端**：Python 3.8+ 標準函式庫（`sqlite3` + `http.server`），**零第三方套件**
 - **資料**：單一 SQLite 檔案（`data/cases.db`），多人同時存取
-- **前端**：原生 HTML/CSS/JS，無 CDN、無框架，介面為實驗室台帳排版
+- **前端**：原生 HTML/CSS/JS，無 CDN、無框架，介面為實驗室紀錄簿式的清單排版
 - **匯出**：Excel（.xlsx）與 CSV，可直接接回既有試算表流程
 
 ---
@@ -90,12 +90,12 @@ python3 run.py seed-demo       # 想先看看畫面，可寫入 7 筆示範資�
 
 ## 四、與既有 Excel 整合
 
-### 匯入既有台帳
+### 匯入既有清單
 
 Excel 另存為「**CSV UTF-8（逗號分隔）**」後：
 
 ```bash
-python3 run.py import 既有台帳.csv
+python3 run.py import 既有清單.csv
 ```
 
 - 表頭可用中文（`案件編號`、`合約編號`、`研究編號`、`客戶名稱`、`到期日` …）或英文欄位名
@@ -111,7 +111,7 @@ python3 run.py import 既有台帳.csv
 網頁上的「Excel / CSV」按鈕匯出**目前篩選結果**；命令列則可匯出全部：
 
 ```bash
-python3 run.py export 案件台帳.xlsx
+python3 run.py export 案件清單.xlsx
 python3 run.py export 未結案.csv --open-only
 ```
 
@@ -192,7 +192,7 @@ sqlite3 data/cases.db ".backup '/backup/cases_$(date +%F).db'"
 ### 安全性
 
 本工具設計為**公司內網使用**，沒有帳號密碼——凡連得到這個網址的人都能編輯。
-以 20 人內部台帳而言通常足夠，但請注意：
+以 20 人內部使用而言通常足夠，但請注意：
 
 - 請勿把這個埠號對外開放到網際網路
 - 若日後需要登入驗證或唯讀權限，可在 `case_tracker/server.py` 的 `_dispatch()`
