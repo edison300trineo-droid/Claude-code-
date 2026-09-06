@@ -15,6 +15,7 @@ from .consolidate import (
     STYLE_MANUAL_REVIEW,
     STYLE_NOT_FINAL,
 )
+from .batches import BatchTables
 from .lob import LOBResult
 from .manifest import Manifest
 from .summary import SummaryTables
@@ -38,6 +39,7 @@ SHEET_ANIMALS = "動物分組與性別對照表"
 SHEET_DOTPLOT = "Dot_Plot_Data"
 SHEET_RAW = "Raw_Import"
 SHEET_FILES = "已處理檔案紀錄"
+SHEET_BATCHES = "批次與上機編號進度表"
 SHEET_MANIFEST = "執行紀錄"
 
 # 這些欄位是內部用的，不輸出到報表
@@ -49,7 +51,8 @@ def write_report(path: str | Path, *, config: StudyConfig,
                  lob: LOBResult, curves_frame: pd.DataFrame,
                  qc_frame: pd.DataFrame, organ_codes: pd.DataFrame,
                  animals: pd.DataFrame, raw: pd.DataFrame,
-                 files: pd.DataFrame, manifest: Manifest) -> Path:
+                 files: pd.DataFrame, manifest: Manifest,
+                 batches: BatchTables | None = None) -> Path:
     """把所有分頁寫成一個活頁簿。"""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -71,6 +74,8 @@ def write_report(path: str | Path, *, config: StudyConfig,
         _write(writer, SHEET_CURVES, curves_frame)
         _write(writer, "QC點位明細", qc_frame)
         _write(writer, SHEET_ORGAN_CODES, organ_codes)
+        if batches is not None:
+            _write(writer, SHEET_BATCHES, _batches_frame(batches))
         _write(writer, SHEET_ANIMALS, animals)
         if not summaries.dot_plot.empty:
             _write(writer, SHEET_DOTPLOT, summaries.dot_plot)
@@ -189,6 +194,20 @@ def _lob_frame(lob: LOBResult, summaries: SummaryTables) -> pd.DataFrame:
         blocks.append(pd.DataFrame([[""], ["D. LOB-Adjusted Calculation（校正後彙整）"]]))
         blocks.append(_frame_with_header(summaries.blood_lob_adjusted))
 
+    return pd.concat(blocks, ignore_index=True)
+
+
+def _batches_frame(batches: BatchTables) -> pd.DataFrame:
+    """批次組成與 Run 進度疊成同一分頁。"""
+    blocks = [
+        pd.DataFrame([["A. 批次(Batch)組成"]]),
+        _frame_with_header(batches.composition),
+        pd.DataFrame([[""], ["B. 上機編號(Run)進度表"]]),
+        _frame_with_header(batches.progress),
+    ]
+    if batches.notes:
+        blocks.append(pd.DataFrame([[""], ["備註／推論（請核對）"]]))
+        blocks.extend(pd.DataFrame([[f"• {note}"]]) for note in batches.notes)
     return pd.concat(blocks, ignore_index=True)
 
 

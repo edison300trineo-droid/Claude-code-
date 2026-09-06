@@ -36,6 +36,12 @@ standard_curve:
   # 超出此容差代表設定檔的稀釋序列填錯了，會在執行時提出警告。
   nominal_tolerance: 0.001
   lloq_point: STD08          # 該 run 的 LLOQ 取這一點的濃度
+  # 回歸基準：
+  #   point_mean = 每個標準點取 Ct 平均後回歸（n = 標準點數，與既有統整表一致）
+  #   well       = 直接用所有標準品孔位回歸（n = 孔位數）
+  # 平衡設計下兩者斜率/截距相同，但 well 會把孔間變異算進殘差，R² 較低。
+  # R² 是允收標準，所以這個選項會影響判定結果。
+  fit_basis: point_mean
   min_r_squared: 0.98
   efficiency_range: [85.0, 115.0]   # PCR 效率 (%)
 
@@ -169,3 +175,27 @@ reference:
   #   conflict = 標記衝突並留白（預設，需人工確認）
   #   first    = 採用第一個來源
   on_conflict: conflict
+
+# --- 臟器批次與上機編號 (Run) ------------------------------------------------
+# 來源：BD-TS-20260701 上機編號_說明.xlsx（官方上機編號對照表）。
+# 同一批次的 3 個臟器代碼於同一個 Run 內一起上機，每個 Run 對應 1 個原始 qPCR 檔。
+batches:
+  "99+03+64": ["99", "03", "64"]
+  "27+23+22": ["27", "23", "22"]
+  "19+24+21": ["19", "24", "21"]
+  "04+25+01": ["04", "25", "01"]
+  "61+62+63": ["61", "62", "63"]
+
+run_schedule:
+  # 官方對照表僅預先填寫這 6 組 Run 編號；其餘由實際匯入資料逆推，
+  # 產出表會在「批次/時間點資料來源」欄註明兩者的差別。
+  official:
+    - {run: 1, batch: "99+03+64", timepoint: "Predose"}
+    - {run: 2, batch: "99+03+64", timepoint: "Day 2"}
+    - {run: 3, batch: "99+03+64", timepoint: "Day 8"}
+    - {run: 4, batch: "27+23+22", timepoint: "Predose"}
+    - {run: 5, batch: "27+23+22", timepoint: "Day 2"}
+    - {run: 6, batch: "27+23+22", timepoint: "Day 8"}
+  # Run 編號與原始檔案的對應：原始檔內沒有 Run 編號欄位，
+  # 因此依 Run 結束時間排序推定。這是推定值，產出表會註明。
+  assign_by: run_end_time

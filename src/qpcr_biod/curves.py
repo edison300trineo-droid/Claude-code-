@@ -21,7 +21,7 @@ class StandardCurve:
     intercept: float | None
     r_squared: float | None
     efficiency: float | None
-    n_points: int
+    n_points: int          # 實際參與回歸的點數（依 fit_basis 為標準點數或孔位數）
     lloq: float | None
     lloq_point: str
     r2_pass: bool
@@ -63,15 +63,38 @@ def fit_standard_curve(wells: pd.DataFrame, source_file: str,
     lloq = _lloq_for_run(subset, config, notes)
     _check_nominal_concentrations(subset, config, notes)
 
-    if len(points) < 3:
-        notes.append("標準品有效孔位少於 3 點，無法回歸。")
+    basis = config.fit_basis
+    if basis == "point_mean":
+        # 每個標準點取 Ct 平均後回歸，n = 標準點數。
+        # 平衡設計下斜率/截距與逐孔回歸相同，但 R² 不含孔間變異。
+        grouped = points.groupby("std_point", dropna=True).agg(
+            quantity=("quantity", "first"), ct=("ct", "mean")
+        )
+        x_values = grouped["quantity"].astype(float).to_numpy()
+        y_values = grouped["ct"].astype(float).to_numpy()
+    elif basis == "well":
+        x_values = points["quantity"].astype(float).to_numpy()
+        y_values = points["ct"].astype(float).to_numpy()
+    else:
+        notes.append(
+            f"設定檔的 fit_basis 值「{basis}」無法辨識，本次改用 point_mean。"
+        )
+        grouped = points.groupby("std_point", dropna=True).agg(
+            quantity=("quantity", "first"), ct=("ct", "mean")
+        )
+        x_values = grouped["quantity"].astype(float).to_numpy()
+        y_values = grouped["ct"].astype(float).to_numpy()
+
+    n_used = len(x_values)
+    if n_used < 3:
+        notes.append(f"標準曲線有效點數為 {n_used}，少於 3 點，無法回歸。")
         return StandardCurve(
-            source_file, None, None, None, None, len(points), lloq, lloq_point,
+            source_file, None, None, None, None, n_used, lloq, lloq_point,
             False, False, notes,
         )
 
-    x = np.log10(points["quantity"].astype(float).to_numpy())
-    y = points["ct"].astype(float).to_numpy()
+    x = np.log10(x_values)
+    y = y_values
     slope, intercept = np.polyfit(x, y, 1)
 
     predicted = slope * x + intercept
@@ -100,7 +123,7 @@ def fit_standard_curve(wells: pd.DataFrame, source_file: str,
         intercept=float(intercept),
         r_squared=None if r_squared is None else float(r_squared),
         efficiency=None if efficiency is None else float(efficiency),
-        n_points=len(points),
+        n_points=n_used,
         lloq=lloq,
         lloq_point=lloq_point,
         r2_pass=r2_pass,

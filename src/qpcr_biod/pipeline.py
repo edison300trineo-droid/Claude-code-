@@ -8,6 +8,7 @@ from typing import Any
 
 import pandas as pd
 
+from .batches import build_batch_tables
 from .classify import annotate_wells, resolve_reruns
 from .config import StudyConfig
 from .consolidate import build_consolidated
@@ -94,7 +95,11 @@ def run_pipeline(config: StudyConfig, *, output_name: str | None = None,
     lob = compute_lob(wells, result.table, config)
     summaries = build_summaries(result.table, lob, config)
 
-    # 6. 輸出
+    # 6. 批次與上機編號進度
+    batch_tables = build_batch_tables(wells, result.table, run_order, config)
+    warnings.extend(batch_tables.notes)
+
+    # 7. 輸出
     manifest.warnings = warnings
     for entry in reference.files:
         manifest.inputs.append({**entry, "SHA-256": "", "檔案類型": entry.get("檔案類型", "參考資料")})
@@ -116,6 +121,7 @@ def run_pipeline(config: StudyConfig, *, output_name: str | None = None,
             raw=wells,
             files=manifest.inputs_frame(),
             manifest=manifest,
+            batches=batch_tables,
         )
     else:
         # 即使不輸出，仍要跑一次對照表建構，才能把「未收錄的臟器代碼」這類問題檢查出來
