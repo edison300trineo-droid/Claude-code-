@@ -79,25 +79,15 @@ class ValidationTests(unittest.TestCase):
 class CaseNoRuleTests(unittest.TestCase):
     def test_prefix_required(self):
         with self.assertRaises(models.ValidationError) as ctx:
-            models.validate(sample(case_no="TN-VI1141101-R01"))
+            models.validate(sample(case_no="A-1141101-R01"))
         self.assertIn("QT", ctx.exception.errors["case_no"])
 
     def test_prefix_normalised_to_uppercase(self):
         self.assertEqual(models.validate(sample(case_no="qt114001"))["case_no"], "QT114001")
 
-    def test_legacy_number_kept_when_unchanged(self):
-        clean = models.validate(
-            {"case_no": "TN-VI1141101-R01"}, partial=True,
-            existing_case_no="TN-VI1141101-R01",
-        )
-        self.assertEqual(clean["case_no"], "TN-VI1141101-R01")
-
-    def test_legacy_number_cannot_be_changed_to_another_legacy_one(self):
+    def test_prefix_enforced_on_partial_update_too(self):
         with self.assertRaises(models.ValidationError):
-            models.validate(
-                {"case_no": "TN-OTHER"}, partial=True,
-                existing_case_no="TN-VI1141101-R01",
-            )
+            models.validate({"case_no": "A-1141101-R01"}, partial=True)
 
     def test_contract_and_study_numbers_are_free_text(self):
         clean = models.validate(sample(contract_no="C-114-021 ", study_no="TMT-114-003"))
@@ -114,7 +104,7 @@ class MigrationTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "legacy.db")
+        self.path = os.path.join(self.tmp.name, "v1.db")
         db.close_thread_connection()
 
     def tearDown(self):
@@ -147,7 +137,7 @@ class MigrationTests(unittest.TestCase):
             );
             INSERT INTO cases (case_no, client, case_type, stage, status,
                                created_at, updated_at)
-            VALUES ('TN-VI1141101-R01', '宏碩生技', 'GLP 研究', '試驗執行中', '進行中',
+            VALUES ('QT114001', '宏碩生技', 'GLP 研究', '試驗執行中', '進行中',
                     '2026-01-01T09:00:00', '2026-01-01T09:00:00');
             PRAGMA user_version=1;
             """
@@ -163,17 +153,20 @@ class MigrationTests(unittest.TestCase):
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(cases)")}
         self.assertIn("contract_no", columns)
         self.assertIn("study_no", columns)
-        legacy = db.get_by_case_no(conn, "TN-VI1141101-R01")
-        self.assertEqual(legacy["contract_no"], "")
+        existing = db.get_by_case_no(conn, "QT114001")
+        self.assertEqual(existing["contract_no"], "")
 
-    def test_legacy_row_stays_editable(self):
+    def test_existing_rows_take_the_new_fields(self):
         self._build_v1()
         db.configure(self.path)
         conn = db.connect()
-        legacy = db.get_by_case_no(conn, "TN-VI1141101-R01")
-        updated = db.update_case(conn, legacy["id"], {"contract_no": "C-114-021"}, "測試員")
+        existing = db.get_by_case_no(conn, "QT114001")
+        updated = db.update_case(
+            conn, existing["id"], {"contract_no": "C-114-021", "study_no": "TMT-114-003"},
+            "測試員",
+        )
         self.assertEqual(updated["contract_no"], "C-114-021")
-        self.assertEqual(updated["case_no"], "TN-VI1141101-R01")
+        self.assertEqual(updated["study_no"], "TMT-114-003")
 
 
 class DueStateTests(unittest.TestCase):
@@ -228,6 +221,12 @@ class CrudTests(TempDbTestCase):
         created = db.create_case(self.conn, sample())
         same = db.update_case(self.conn, created["id"], {"owner": created["owner"]})
         self.assertEqual(same["rev"], 1)
+
+    def test_update_rejects_non_qt_case_no(self):
+        created = db.create_case(self.conn, sample())
+        with self.assertRaises(models.ValidationError):
+            db.update_case(self.conn, created["id"], {"case_no": "A-1141101-R01"})
+        self.assertEqual(db.get_case(self.conn, created["id"])["case_no"], "QT114001")
 
     def test_delete(self):
         created = db.create_case(self.conn, sample())

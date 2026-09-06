@@ -303,7 +303,7 @@ def update_case(conn, case_id, payload, operator="", expected_rev=None):
         row = conn.execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
         if row is None:
             raise NotFound(f"查無案件 id={case_id}")
-        data = models.validate(payload, partial=True, existing_case_no=row["case_no"])
+        data = models.validate(payload, partial=True)
         if expected_rev is not None and int(expected_rev) != row["rev"]:
             raise ConflictError(
                 f"此案件已由 {row['updated_by'] or '他人'} 於 {row['updated_at']} 更新，請重新載入後再編輯"

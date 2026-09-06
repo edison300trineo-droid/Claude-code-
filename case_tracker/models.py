@@ -87,12 +87,8 @@ def parse_date(value):
     return datetime.strptime(value, "%Y-%m-%d").date()
 
 
-def validate(payload, partial=False, existing_case_no=None):
-    """驗證並正規化案件資料，回傳只含合法欄位的 dict。
-
-    existing_case_no 為該筆資料原本的案件編號；編號沒被改動時不再檢查
-    QT 前綴，既有的舊編號才不會因為新規則而無法編輯。
-    """
+def validate(payload, partial=False):
+    """驗證並正規化案件資料，回傳只含合法欄位的 dict。"""
     errors = {}
     clean = {}
 
@@ -103,14 +99,13 @@ def validate(payload, partial=False, existing_case_no=None):
         value = "" if raw is None else str(raw).strip()
 
         if field == "case_no":
-            unchanged = bool(existing_case_no) and value.lower() == existing_case_no.lower()
             if not value:
                 errors[field] = "案件編號為必填"
             elif len(value) > MAX_LEN[field]:
                 errors[field] = f"案件編號不可超過 {MAX_LEN[field]} 字"
             elif value[: len(CASE_NO_PREFIX)].upper() == CASE_NO_PREFIX:
                 value = CASE_NO_PREFIX + value[len(CASE_NO_PREFIX):]  # 前綴統一大寫
-            elif not unchanged:
+            else:
                 errors[field] = f"案件編號須以 {CASE_NO_PREFIX} 開頭（例：{CASE_NO_PREFIX}114001）"
         elif field == "case_type":
             if value not in CASE_TYPES:
