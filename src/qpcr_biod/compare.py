@@ -13,8 +13,11 @@ from typing import Any
 
 import pandas as pd
 
-# 對帳用的鍵：一筆結果由「哪一隻動物的哪個臟器、來自哪個原始檔」唯一決定
+# 對帳用的鍵：一筆結果通常由「哪一隻動物的哪個臟器、來自哪個原始檔」唯一決定。
+# 但同一塊盤上可能同時有 1011_03 與 1011_03_re 兩個版本，這時三欄會撞號，
+# 需要把 Sample Name 一起納入 —— compare_tables 偵測到撞號時會自動升級。
 KEY_COLUMNS = ["動物編號", "臟器代碼", "來源檔案"]
+VERSION_COLUMN = "Sample Name"
 
 # 需要逐欄比對的欄位。數值欄用容差比較，其餘用字串比較。
 NUMERIC_COLUMNS = [
@@ -99,15 +102,27 @@ def _as_number(value: Any) -> float | None:
         return None
 
 
-def _prepare(frame: pd.DataFrame) -> pd.DataFrame:
+def _prepare(frame: pd.DataFrame, with_version: bool) -> pd.DataFrame:
     prepared = frame.copy()
     prepared["動物編號"] = prepared["動物編號"].map(lambda v: _norm_id(v, 4))
     prepared["臟器代碼"] = prepared["臟器代碼"].map(lambda v: _norm_id(v, 2))
     prepared["來源檔案"] = prepared["來源檔案"].map(_norm_text)
-    prepared["對照鍵"] = (
-        prepared["動物編號"] + "_" + prepared["臟器代碼"] + " @ " + prepared["來源檔案"]
-    )
+
+    if with_version and VERSION_COLUMN in prepared.columns:
+        label = prepared[VERSION_COLUMN].map(_norm_text)
+        # Sample Name 空白時退回 動物_臟器，才不會整批變成同一個鍵
+        label = label.where(
+            label != "", prepared["動物編號"] + "_" + prepared["臟器代碼"]
+        )
+    else:
+        label = prepared["動物編號"] + "_" + prepared["臟器代碼"]
+
+    prepared["對照鍵"] = label + " @ " + prepared["來源檔案"]
     return prepared
+
+
+def _has_duplicate_keys(frame: pd.DataFrame) -> bool:
+    return bool(frame["對照鍵"].duplicated().any())
 
 
 def load_previous(path: str | Path, sheet: str = DEFAULT_SHEET) -> pd.DataFrame:
@@ -141,8 +156,18 @@ def compare_tables(old: pd.DataFrame, new: pd.DataFrame, *,
     但仍抓得出任何有意義的計算差異。
     """
     result = ComparisonResult()
-    old_prepared = _prepare(old)
-    new_prepared = _prepare(new)
+
+    # 先用三欄鍵；任一邊撞號就把 Sample Name 納入，讓同盤的多版本分得開
+    old_prepared = _prepare(old, with_version=False)
+    new_prepared = _prepare(new, with_version=False)
+    if _has_duplicate_keys(old_prepared) or _has_duplicate_keys(new_prepared):
+        old_prepared = _prepare(old, with_version=True)
+        new_prepared = _prepare(new, with_version=True)
+        result.notes.append(
+            "偵測到同一動物＋臟器＋來源檔案有多個版本（例如同盤的原始與 _re），"
+            f"已自動改用「{VERSION_COLUMN}」作為對照鍵。若兩邊的 "
+            f"{VERSION_COLUMN} 寫法不同，會顯示為「只在某一邊」的列，請留意。"
+        )
 
     old_keys = set(old_prepared["對照鍵"])
     new_keys = set(new_prepared["對照鍵"])
@@ -167,7 +192,7 @@ def compare_tables(old: pd.DataFrame, new: pd.DataFrame, *,
     old_indexed = old_prepared.set_index("對照鍵")
     new_indexed = new_prepared.set_index("對照鍵")
 
-    # 同一鍵在單一表內重複出現，代表資料本身有問題，先攤出來再說
+    # 升級鍵值後仍然重複，代表資料本身有問題，攤出來
     for label, frame in (("既有統整表", old_prepared), ("pipeline 產出", new_prepared)):
         duplicated = frame["對照鍵"].duplicated(keep=False)
         if duplicated.any():

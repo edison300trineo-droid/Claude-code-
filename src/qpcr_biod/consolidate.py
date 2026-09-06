@@ -10,7 +10,7 @@ import pandas as pd
 from .classify import SampleClass
 from .config import StudyConfig
 from .curves import StandardCurve
-from .decisions import DecisionSet
+from .decisions import DecisionSet, resolve_decision
 from .reference import ReferenceData
 
 # 列的視覺標記，交給 report 決定實際底色
@@ -40,13 +40,15 @@ def build_consolidated(wells: pd.DataFrame, curves: dict[str, StandardCurve],
     unit = config.unit
 
     rows: list[dict[str, Any]] = []
-    for (animal_id, organ_code, source_file), group in animals.groupby(
-        ["animal_id", "organ_code", "source_file"], dropna=True
+    # 版本身分是 (來源檔案, Sample Name)：同一塊盤上可能同時有
+    # 1011_03 與 1011_03_re，兩者必須各自成列。
+    for (animal_id, organ_code, source_file, sample_name), group in animals.groupby(
+        ["animal_id", "organ_code", "source_file", "sample_name"], dropna=True
     ):
         curve = curves.get(source_file)
         lloq = curve.lloq if curve else None
         rows.append(_build_row(
-            animal_id, organ_code, source_file, group, lloq,
+            animal_id, organ_code, source_file, sample_name, group, lloq,
             reference, decisions, config, unit, nd_label, warnings,
         ))
 
@@ -64,7 +66,7 @@ def build_consolidated(wells: pd.DataFrame, curves: dict[str, StandardCurve],
 
 
 def _build_row(animal_id: str, organ_code: str, source_file: str,
-               group: pd.DataFrame, lloq: float | None,
+               sample_name: str, group: pd.DataFrame, lloq: float | None,
                reference: ReferenceData, decisions: DecisionSet,
                config: StudyConfig, unit: str, nd_label: str,
                warnings: list[str]) -> dict[str, Any]:
@@ -90,7 +92,7 @@ def _build_row(animal_id: str, organ_code: str, source_file: str,
         "動物編號": animal_id,
         "臟器代碼": organ_code,
         "臟器名稱": organ_names[0],
-        "Sample Name": f"{animal_id}_{organ_code}",
+        "Sample Name": sample_name,
         "版本": _version_of(group),
         "最終採用": "",          # 稍後由 _apply_final_use 決定
         "Quantity Mean 定量平均值": quantity_mean,
@@ -108,6 +110,9 @@ def _build_row(animal_id: str, organ_code: str, source_file: str,
         "組別(Group)": group_name,
         "採樣時間點(Time point)": timepoint,
         "最終列比對Key(輔助)": f"{animal_id}|{organ_code}",
+        "rerun判定依據": _first(group, "rerun_basis") or "",
+        "_run_order": int(_first(group, "run_order") or 0),
+        "_named_rerun": bool(group["is_rerun_by_name"].any()),
         "列標記": STYLE_NORMAL,
     }
 
@@ -192,63 +197,79 @@ def _animal_metadata(animal_id: str, reference: ReferenceData,
 
 def _apply_final_use(table: pd.DataFrame, decisions: DecisionSet,
                      config: StudyConfig, warnings: list[str]) -> pd.DataFrame:
-    """決定每個 動物_臟器 的最終採用列。
+    """決定每個 動物_臟器 的最終採用版本。
 
-    預設規則：有 rerun 時以 rerun 為最終採用（rerun 多半是 HIGHSD 高變異後的
-    複測），原始版本保留但標為非最終。決策表可逐列覆寫此預設。
+    預設規則：最新的複測勝出。排序鍵是 (run 順序, 是否為名稱標記的 rerun)，
+    所以同盤的 `_re` 會勝過同盤的原始，而較晚的 run 又勝過同盤的 `_re`。
+    決策表可逐版本覆寫此預設。
     """
     frame = table.copy()
     frame["最終採用"] = "N"
     frame["採用依據"] = ""
 
     for key, group in frame.groupby("最終列比對Key(輔助)"):
-        sources_in_group = set(group["來源檔案"])
-        overrides = {
-            source: decision
-            for (animal, organ, source), decision in decisions.final_use.items()
-            if f"{animal}|{organ}" == key and source in sources_in_group
-        }
-        chosen = [s for s, d in overrides.items() if d["最終採用"] == "Y"]
+        ordered = group.sort_values(["_run_order", "_named_rerun"])
+        chosen_index, basis = _choose_final(key, ordered, decisions, warnings)
+        frame.loc[chosen_index, "最終採用"] = "Y"
+        frame.loc[chosen_index, "採用依據"] = basis
 
-        if len(chosen) > 1:
-            warnings.append(
-                f"{key}：決策表指定了 {len(chosen)} 列為最終採用，"
-                "同一動物＋臟器只能有一列。本次全部視為未指定，改用系統預設規則。"
+        for index, row in group.iterrows():
+            decision = resolve_decision(
+                decisions.final_use, row["動物編號"], row["臟器代碼"],
+                row["來源檔案"], row["Sample Name"],
             )
-            chosen = []
-
-        if chosen:
-            target = chosen[0]
-            basis = "決策表指定"
-        else:
-            reruns = group[group["版本"] == "rerun"]
-            pool = reruns if not reruns.empty else group
-            target = pool.iloc[-1]["來源檔案"] if len(pool) else group.iloc[-1]["來源檔案"]
-            basis = "系統預設(rerun優先)" if not reruns.empty else "系統預設(唯一版本)"
-            if len(pool) > 1:
-                warnings.append(
-                    f"{key}：有 {len(pool)} 個同版本結果，預設採用最後一個 run "
-                    f"({target})。如需改採其他列，請在決策表「最終採用覆核」指定。"
-                )
-
-        mask = (frame["最終列比對Key(輔助)"] == key)
-        frame.loc[mask & (frame["來源檔案"] == target), "最終採用"] = "Y"
-        frame.loc[mask & (frame["來源檔案"] == target), "採用依據"] = basis
-
-        for source, decision in overrides.items():
+            if decision is None:
+                continue
             note = (
                 f"最終採用由 {decision['覆核者']} 於 {decision['覆核日期']} 指定為 "
                 f"{decision['最終採用']}"
             )
             if decision.get("理由"):
                 note += f"：{decision['理由']}"
-            row_mask = mask & (frame["來源檔案"] == source)
-            frame.loc[row_mask, "備註"] = frame.loc[row_mask, "備註"].map(
-                lambda existing: _append_note(existing, note)
-            )
+            frame.loc[index, "備註"] = _append_note(frame.loc[index, "備註"], note)
 
     frame.loc[frame["最終採用"] == "N", "列標記"] = STYLE_NOT_FINAL
-    return frame
+    return frame.drop(columns=["_run_order", "_named_rerun"])
+
+
+def _choose_final(key: str, ordered: pd.DataFrame, decisions: DecisionSet,
+                  warnings: list[str]) -> tuple[Any, str]:
+    """回傳 (要標記為最終採用的 index, 採用依據文字)。"""
+    picked: list[Any] = []
+    for index, row in ordered.iterrows():
+        decision = resolve_decision(
+            decisions.final_use, row["動物編號"], row["臟器代碼"],
+            row["來源檔案"], row["Sample Name"],
+        )
+        if decision is not None and decision["最終採用"] == "Y":
+            picked.append(index)
+
+    if len(picked) > 1:
+        warnings.append(
+            f"{key}：決策表指定了 {len(picked)} 個版本為最終採用，"
+            "同一動物＋臟器只能有一個。本次全部視為未指定，改用系統預設規則。"
+        )
+        picked = []
+
+    if picked:
+        return picked[0], "決策表指定"
+
+    if len(ordered) == 1:
+        return ordered.index[-1], "系統預設(唯一版本)"
+
+    # 排序後的最後一筆＝最新的複測
+    last = ordered.iloc[-1]
+    tied = ordered[
+        (ordered["_run_order"] == last["_run_order"])
+        & (ordered["_named_rerun"] == last["_named_rerun"])
+    ]
+    if len(tied) > 1:
+        warnings.append(
+            f"{key}：同一個 run 內有 {len(tied)} 個版本無法分出先後"
+            f"（{'、'.join(tied['Sample Name'])}），預設採用最後一筆。"
+            "如需改採其他版本，請在決策表「最終採用覆核」的 Sample Name 欄指定。"
+        )
+    return ordered.index[-1], "系統預設(最新複測優先)"
 
 
 def _finalise_highsd(table: pd.DataFrame, decisions: DecisionSet,
@@ -277,8 +298,10 @@ def _finalise_highsd(table: pd.DataFrame, decisions: DecisionSet,
         style = record["列標記"]
 
         key = record["最終列比對Key(輔助)"]
-        decision_key = (record["動物編號"], record["臟器代碼"], record["來源檔案"])
-        highsd_decision = decisions.highsd_well.get(decision_key)
+        highsd_decision = resolve_decision(
+            decisions.highsd_well, record["動物編號"], record["臟器代碼"],
+            record["來源檔案"], record["Sample Name"],
+        )
 
         # 人工選孔：只在有決策時才動 Quantity Mean
         if highsd_decision:

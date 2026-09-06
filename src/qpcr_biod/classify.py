@@ -118,18 +118,21 @@ def annotate_wells(wells: pd.DataFrame, config: StudyConfig) -> pd.DataFrame:
 
 def resolve_reruns(wells: pd.DataFrame, run_order: dict[str, int],
                    config: StudyConfig) -> pd.DataFrame:
-    """標記每個 動物_臟器 在各 run 的版本（原始 / rerun）。
+    """標記每個檢體版本是「原始」還是「rerun」。
 
-    兩條判定來源：
-      1. 樣品名稱後綴（明確標記）
-      2. 同一 key 出現於多個 run 時，Run 結束時間較晚者視為 rerun
+    版本的身分是 (來源檔案, Sample Name)，不是 (來源檔案) —— 因為 rerun 有兩種
+    形式，而且可能同時出現：
 
-    第 2 條可由設定關閉。任一 key 若在同一 run 內就出現名稱標記與非標記的
-    分歧，標記為 ambiguous 交由決策表處理，不自行選邊。
+      1. 名稱後綴：同一塊盤上有 `1011_03` 與 `1011_03_re`
+      2. 較晚的 run：同一 動物_臟器 在後面的檔案又跑了一次
+
+    以檔案為單位判定會把同盤的兩個版本併成一筆，並把原始那筆也誤標成 rerun。
+    第 2 條可由設定關閉。
     """
     frame = wells.copy()
     frame["version"] = "原始"
     frame["rerun_basis"] = ""
+    frame["run_order"] = frame["source_file"].map(run_order).fillna(0).astype(int)
 
     animals = frame[frame["sample_class"] == SampleClass.ANIMAL.value]
     if animals.empty:
@@ -138,19 +141,27 @@ def resolve_reruns(wells: pd.DataFrame, run_order: dict[str, int],
     later_is_rerun = bool(config.sample.get("later_run_is_rerun", True))
 
     for key, group in animals.groupby("sample_key", dropna=True):
-        files = sorted(group["source_file"].unique(), key=lambda f: run_order.get(f, 0))
-        for source_file in files:
-            mask = (frame["sample_key"] == key) & (frame["source_file"] == source_file)
-            named_rerun = bool(group.loc[group["source_file"] == source_file,
-                                         "is_rerun_by_name"].any())
-            positional_rerun = later_is_rerun and source_file != files[0]
-            if named_rerun or positional_rerun:
-                frame.loc[mask, "version"] = "rerun"
-                basis = []
-                if named_rerun:
-                    basis.append("樣品名稱標記")
-                if positional_rerun:
-                    basis.append("較晚的run")
-                frame.loc[mask, "rerun_basis"] = "、".join(basis)
+        versions = group[["source_file", "sample_name", "is_rerun_by_name"]].drop_duplicates()
+        earliest = min(run_order.get(f, 0) for f in versions["source_file"])
+
+        for version in versions.itertuples(index=False):
+            named = bool(version.is_rerun_by_name)
+            positional = later_is_rerun and run_order.get(version.source_file, 0) > earliest
+            if not (named or positional):
+                continue
+
+            basis = []
+            if named:
+                basis.append("樣品名稱標記")
+            if positional:
+                basis.append("較晚的run")
+
+            mask = (
+                (frame["sample_key"] == key)
+                & (frame["source_file"] == version.source_file)
+                & (frame["sample_name"] == version.sample_name)
+            )
+            frame.loc[mask, "version"] = "rerun"
+            frame.loc[mask, "rerun_basis"] = "、".join(basis)
 
     return frame

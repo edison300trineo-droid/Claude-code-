@@ -23,11 +23,15 @@ SHEET_ORGAN = "臟器代碼補充"
 SHEET_README = "填寫說明"
 
 KEY_COLUMNS = ["動物編號", "臟器代碼", "來源檔案"]
+# 同一個原始檔內可能同時有 1011_03 與 1011_03_re 兩個版本，
+# 這時要靠 Sample Name 指定是哪一個。只有一個版本時可留空。
+OPTIONAL_KEY = "Sample Name(同檔多版本時填)"
 AUDIT_COLUMNS = ["覆核者", "覆核日期", "理由"]
 
 SCHEMA: dict[str, list[str]] = {
-    SHEET_FINAL: KEY_COLUMNS + ["最終採用(Y/N)"] + AUDIT_COLUMNS,
-    SHEET_HIGHSD: KEY_COLUMNS + ["採用方式(孔位1/孔位2/兩孔平均)"] + AUDIT_COLUMNS,
+    SHEET_FINAL: KEY_COLUMNS + [OPTIONAL_KEY, "最終採用(Y/N)"] + AUDIT_COLUMNS,
+    SHEET_HIGHSD: KEY_COLUMNS + [OPTIONAL_KEY,
+                                 "採用方式(孔位1/孔位2/兩孔平均)"] + AUDIT_COLUMNS,
     SHEET_GROUP: ["動物編號", "組別"] + AUDIT_COLUMNS,
     SHEET_ORGAN: ["臟器代碼", "臟器名稱(英文)", "臟器名稱(中文)"] + AUDIT_COLUMNS,
 }
@@ -43,6 +47,8 @@ README_LINES = [
     [f"  {SHEET_FINAL}：同一動物＋臟器有多個版本時，指定哪一列為最終採用。"],
     ["      不填 = 依系統預設規則（rerun 優先於原始）。"],
     [f"  {SHEET_HIGHSD}：兩重複孔位差異過大(HIGHSD=Y)且無 rerun 時，指定採用哪一孔。"],
+    ["      同一個原始檔內若同時有 1011_03 與 1011_03_re，請在 Sample Name 欄"],
+    ["      指定是哪一個版本；只有一個版本時留空即可。"],
     ["      不填 = 系統不自行選孔，該列標記為「請人工複核」並以兩孔平均暫呈。"],
     [f"  {SHEET_GROUP}：時間點無法唯一判定組別時（例如 Day 29 兩組皆可能採樣），"],
     ["      在此指定該動物的組別。"],
@@ -72,6 +78,20 @@ class DecisionSet:
             len(self.final_use) + len(self.highsd_well)
             + len(self.group_override) + len(self.organ_override)
         )
+
+
+def resolve_decision(table: dict, animal: str, organ: str, source: str,
+                     sample_name: str) -> dict[str, Any] | None:
+    """找出適用於某一列的決策。
+
+    先找完全指定版本的決策；沒有的話再找未指定版本的（Sample Name 留空），
+    後者代表「這個檔案裡的這個檢體」，只有在該檔只有一個版本時才明確。
+    呼叫端負責檢查是否只有一個版本。
+    """
+    exact = table.get((animal, organ, source, sample_name))
+    if exact is not None:
+        return exact
+    return table.get((animal, organ, source, ""))
 
 
 def _norm(value: Any) -> str:
@@ -207,7 +227,10 @@ def _load_final_use(frame: pd.DataFrame | None, decisions: DecisionSet) -> None:
         ok, audit = _audit_ok(row, SHEET_FINAL, label, decisions.warnings)
         if not ok:
             continue
-        decisions.final_use[(animal, organ, source)] = {"最終採用": choice, **audit}
+        sample_name = _norm(row.get(OPTIONAL_KEY))
+        decisions.final_use[(animal, organ, source, sample_name)] = {
+            "最終採用": choice, **audit
+        }
 
 
 def _load_highsd(frame: pd.DataFrame | None, decisions: DecisionSet) -> None:
@@ -229,7 +252,10 @@ def _load_highsd(frame: pd.DataFrame | None, decisions: DecisionSet) -> None:
         ok, audit = _audit_ok(row, SHEET_HIGHSD, label, decisions.warnings)
         if not ok:
             continue
-        decisions.highsd_well[(animal, organ, source)] = {"採用方式": choice, **audit}
+        sample_name = _norm(row.get(OPTIONAL_KEY))
+        decisions.highsd_well[(animal, organ, source, sample_name)] = {
+            "採用方式": choice, **audit
+        }
 
 
 def _load_group(frame: pd.DataFrame | None, decisions: DecisionSet) -> None:

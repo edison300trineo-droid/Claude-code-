@@ -20,8 +20,8 @@ def test_reads_preamble_and_wells():
     assert run.preamble["Instrument Type"] == "steponeplus"
     assert run.run_end_time == "2026-08-18 15:00:52 PM CST"
     assert run.has_highsd_column is True
-    # 16 標準品 + 30 檢體(15×2) + 6 敏感度 + 2 基質 + 2 NTC
-    assert len(run.wells) == 56
+    # 16 標準品 + 34 檢體(17×2) + 6 敏感度 + 2 基質 + 2 NTC
+    assert len(run.wells) == 60
     assert set(["source_file", "well", "sample_name", "task", "ct"]).issubset(run.wells.columns)
 
 

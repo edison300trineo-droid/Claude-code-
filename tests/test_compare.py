@@ -91,3 +91,24 @@ def test_sheet_without_key_columns_is_rejected(study_dir, config, tmp_path):
     pd.DataFrame({"隨便": [1]}).to_excel(path, sheet_name="統整數據", index=False)
     with pytest.raises(ValueError, match="缺少對照所需的欄位"):
         load_previous(path, "統整數據")
+
+
+def test_key_escalates_to_sample_name_when_a_plate_holds_two_versions(study_dir, config):
+    """同盤的 1014_22 與 1014_22_re 不能被當成同一筆對照。"""
+    table = run_pipeline(config).consolidated
+    result = compare_tables(table, table)
+
+    assert result.is_clean
+    assert result.matched == len(table), "升級鍵值後每一列都要能各自對到"
+    assert any("已自動改用" in note for note in result.notes)
+
+
+def test_escalated_key_still_detects_a_difference_on_one_version(study_dir, config):
+    table = run_pipeline(config).consolidated
+    modified = table.copy()
+    target = modified.index[modified["Sample Name"] == "1014_22_re"][0]
+    modified.loc[target, "Quantity Mean 定量平均值"] = 9.99
+
+    result = compare_tables(table, modified)
+    assert result.differing_rows == 1
+    assert "1014_22_re" in result.differences.iloc[0]["對照鍵"]

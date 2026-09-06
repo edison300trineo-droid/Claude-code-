@@ -143,15 +143,17 @@ def _load_decisions_safely(config: StudyConfig, warnings: list[str]) -> Decision
 
 
 def _record_decisions(manifest: Manifest, decisions: DecisionSet) -> None:
-    for (animal, organ, source), value in decisions.final_use.items():
+    for (animal, organ, source, sample_name), value in decisions.final_use.items():
+        target = f"{sample_name or animal + '_' + organ} @ {source}"
         manifest.decisions.append({
-            "決策類型": "最終採用覆核", "對象": f"{animal}_{organ} @ {source}",
+            "決策類型": "最終採用覆核", "對象": target,
             "內容": value["最終採用"], "覆核者": value["覆核者"],
             "覆核日期": value["覆核日期"], "理由": value.get("理由", ""),
         })
-    for (animal, organ, source), value in decisions.highsd_well.items():
+    for (animal, organ, source, sample_name), value in decisions.highsd_well.items():
+        target = f"{sample_name or animal + '_' + organ} @ {source}"
         manifest.decisions.append({
-            "決策類型": "HIGHSD單孔採用", "對象": f"{animal}_{organ} @ {source}",
+            "決策類型": "HIGHSD單孔採用", "對象": target,
             "內容": value["採用方式"], "覆核者": value["覆核者"],
             "覆核日期": value["覆核日期"], "理由": value.get("理由", ""),
         })

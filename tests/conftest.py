@@ -17,7 +17,8 @@ REFERENCE_ROWS = [
     ("1007", "Male", "Predose"), ("1008", "Male", "Predose"),
     ("1009", "Male", "Predose"), ("1010", "Male", "Predose"),
     ("1011", "Male", "Day 2"), ("1012", "Male", "Day 2"),
-    ("1013", "Male", "Day 2"), ("1024", "Male", "Day 15"),
+    ("1013", "Male", "Day 2"), ("1014", "Male", "Day 2"),
+    ("1024", "Male", "Day 15"),
     ("1031", "Male", "Day 2"),
 ]
 
