@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>案件追蹤台帳 · Trifecta MedTek</title>
+<link rel="icon" href="/favicon.svg">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">TMT</span>
+    <h1>案件追蹤台帳</h1>
+    <span class="brand-sub">Trifecta MedTek ｜ 臨床前 CRO</span>
+  </div>
+  <div class="topbar-right">
+    <label class="operator">
+      操作者
+      <input id="operator" type="text" maxlength="20" placeholder="輸入姓名" autocomplete="off">
+    </label>
+    <span id="today" class="mono muted"></span>
+  </div>
+</header>
+
+<section class="toolbar">
+  <div class="toolbar-line">
+    <label class="field search">
+      <span>搜尋</span>
+      <input id="search" type="search" placeholder="案件編號或客戶名稱" autocomplete="off">
+    </label>
+    <label class="field"><span>狀態</span><select id="filter-status"></select></label>
+    <label class="field"><span>類型</span><select id="filter-type"></select></label>
+    <label class="field"><span>階段</span><select id="filter-stage"></select></label>
+    <label class="field"><span>負責人</span><select id="filter-owner"></select></label>
+    <label class="check"><input id="filter-open" type="checkbox"> 只看未結案</label>
+    <label class="check"><input id="filter-overdue" type="checkbox"> 只看逾期</label>
+    <button id="btn-reset" class="btn ghost" type="button">清除條件</button>
+  </div>
+  <div class="toolbar-line">
+    <button id="btn-new" class="btn primary" type="button">＋ 新增案件</button>
+    <button id="btn-report" class="btn" type="button">本週到期摘要</button>
+    <span class="spacer"></span>
+    <span class="export-label">匯出目前清單</span>
+    <a id="export-xlsx" class="btn" href="#">Excel (.xlsx)</a>
+    <a id="export-csv" class="btn" href="#">CSV</a>
+  </div>
+</section>
+
+<main>
+  <div id="banner" class="banner" hidden></div>
+  <div class="table-wrap">
+    <table id="ledger">
+      <thead>
+        <tr>
+          <th class="col-no sortable" data-sort="case_no">案件編號</th>
+          <th class="sortable" data-sort="client">客戶名稱</th>
+          <th class="sortable" data-sort="case_type">類型</th>
+          <th class="sortable" data-sort="stage">目前階段</th>
+          <th>下一個里程碑</th>
+          <th class="col-date sortable" data-sort="due_date">到期日</th>
+          <th class="col-due">期限</th>
+          <th class="sortable" data-sort="owner">負責人</th>
+          <th class="sortable" data-sort="status">狀態</th>
+          <th class="col-notes">備註</th>
+          <th class="col-act"></th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</main>
+
+<footer class="statusbar">
+  <span id="summary" class="mono"></span>
+  <span id="saved" class="saved"></span>
+</footer>
+
+<!-- 新增／編輯案件 -->
+<div id="case-modal" class="modal" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2 id="modal-title">新增案件</h2>
+      <button class="icon-btn" type="button" data-close>✕</button>
+    </div>
+    <form id="case-form" class="form-grid" autocomplete="off">
+      <label class="f-half"><span class="lbl">案件編號 <span class="req">*</span></span>
+        <input name="case_no" class="mono" required maxlength="64" placeholder="TN-VI1141101-R01">
+      </label>
+      <label class="f-half">客戶名稱
+        <input name="client" maxlength="120" list="client-list">
+      </label>
+      <label class="f-half">案件類型
+        <select name="case_type"></select>
+      </label>
+      <label class="f-half">目前階段
+        <select name="stage"></select>
+      </label>
+      <label class="f-full">下一個里程碑
+        <input name="next_milestone" maxlength="200" placeholder="例：計畫書送 QA 審查">
+      </label>
+      <label class="f-half">到期日
+        <input name="due_date" class="mono" type="date">
+      </label>
+      <label class="f-half">負責人
+        <input name="owner" maxlength="60" list="owner-list">
+      </label>
+      <label class="f-half">狀態
+        <select name="status"></select>
+      </label>
+      <label class="f-full">備註
+        <textarea name="notes" rows="4" maxlength="4000"></textarea>
+      </label>
+      <div id="form-error" class="form-error" hidden></div>
+      <div class="modal-foot">
+        <span id="meta-line" class="mono muted"></span>
+        <span class="spacer"></span>
+        <button type="button" class="btn ghost" data-close>取消</button>
+        <button type="submit" class="btn primary">儲存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 週報摘要 -->
+<div id="report-modal" class="modal" hidden>
+  <div class="modal-box wide">
+    <div class="modal-head">
+      <h2>到期／逾期摘要</h2>
+      <div class="modal-head-actions">
+        <label class="field inline"><span>區間</span>
+          <select id="report-days">
+            <option value="7">未來 7 天</option>
+            <option value="14">未來 14 天</option>
+            <option value="30">未來 30 天</option>
+          </select>
+        </label>
+        <a id="report-xlsx" class="btn" href="#">Excel</a>
+        <a id="report-csv" class="btn" href="#">CSV</a>
+        <button id="report-print" class="btn" type="button">列印</button>
+        <button class="icon-btn" type="button" data-close>✕</button>
+      </div>
+    </div>
+    <div id="report-body" class="report-body"></div>
+  </div>
+</div>
+
+<datalist id="owner-list"></datalist>
+<datalist id="client-list"></datalist>
+
+<script src="/app.js"></script>
+</body>
+</html>

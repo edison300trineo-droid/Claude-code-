@@ -1,0 +1,17 @@
+# 資料庫與備份（正式資料不進版控）
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# 匯出檔
+*.xlsx
+*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+.DS_Store

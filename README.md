@@ -1,0 +1,229 @@
+# 案件／專案追蹤系統（Trifecta MedTek）
+
+臨床前 CRO 的案件台帳：GLP 研究、方法確效、生物分析、稽核、外包試驗支援、
+BD 授權評估等案件的階段、里程碑、到期日與負責人追蹤。
+
+- **後端**：Python 3.8+ 標準函式庫（`sqlite3` + `http.server`），**零第三方套件**
+- **資料**：單一 SQLite 檔案（`data/cases.db`），多人同時存取
+- **前端**：原生 HTML/CSS/JS，無 CDN、無框架，介面為實驗室台帳排版
+- **匯出**：Excel（.xlsx）與 CSV，可直接接回既有試算表流程
+
+---
+
+## 一、快速開始
+
+```bash
+python3 run.py                 # 啟動服務（預設 http://0.0.0.0:8765）
+python3 run.py seed-demo       # 想先看看畫面，可寫入 7 筆示範資料
+```
+
+啟動後畫面會印出兩個網址：
+
+```
+本機開啟：http://127.0.0.1:8765/
+同仁連線：http://192.168.x.x:8765/     ← 把這個網址發給同仁
+```
+
+同仁用瀏覽器開這個網址即可，**不需在自己電腦安裝任何東西**。
+
+停止服務：`Ctrl + C`。
+
+### Windows
+
+1. 安裝 Python 3（python.org，安裝時勾選 *Add Python to PATH*）
+2. 連按 `start.bat`，或在資料夾開啟命令提示字元執行 `python run.py`
+3. 首次啟動時 Windows 防火牆會詢問，選「允許私人網路存取」，同仁才連得進來
+
+---
+
+## 二、日常操作
+
+| 功能 | 操作方式 |
+| --- | --- |
+| 新增案件 | 左上「＋ 新增案件」 |
+| 編輯 | 該列右側「編輯」，或**在該列上連點兩下** |
+| 刪除 | 該列右側「刪除」（會再確認一次） |
+| 搜尋 | 上方搜尋框，比對**案件編號或客戶名稱** |
+| 篩選 | 狀態／類型／階段／負責人下拉選單，或勾選「只看未結案」「只看逾期」 |
+| 排序 | 點欄位標題切換升冪／降冪 |
+| 逾期提醒 | 逾期列標紅、7 日內到期標黃，頂端顯示逾期件數 |
+| 到期摘要 | 上方「本週到期摘要」，可切換 7／14／30 天、列印或匯出 |
+| 匯出 | 「Excel (.xlsx)」「CSV」，**匯出的是目前篩選後的清單** |
+| 儲存快捷鍵 | 編輯視窗中 `Ctrl + Enter` 儲存、`Esc` 關閉 |
+
+右上角的「操作者」請填自己的姓名——每一次新增／修改都會記錄是誰改的、
+改了哪個欄位、舊值與新值（`case_history` 資料表），日後要追溯不必靠記憶。
+這個姓名存在瀏覽器裡，只是免得每次重打；**案件資料一律存在伺服器的 SQLite**。
+
+---
+
+## 三、欄位定義
+
+| 欄位 | 說明 |
+| --- | --- |
+| 案件編號 | 必填、不可重複（不分大小寫），例：`TN-VI1141101-R01` |
+| 客戶名稱 | 自由輸入，會自動建議已輸入過的客戶 |
+| 案件類型 | GLP 研究／方法確效／生物分析／稽核／外包試驗支援／BD 授權評估 |
+| 目前階段 | 計畫書撰寫 → 計畫書已核准 → 試驗執行中 → 檢體分析中 → QA 審查 → 報告草稿 → 客戶審閱 → 正式報告已發出 → 結案 |
+| 下一個里程碑 | 文字，例：「計畫書送 QA 審查」 |
+| 到期日 | `YYYY-MM-DD`，可留空 |
+| 負責人 | 自由輸入，會自動建議已輸入過的人名 |
+| 狀態 | 進行中／需留意／已延遲／已結案 |
+| 備註 | 長文字 |
+
+期限判定規則：狀態為「已結案」者不再計算逾期；逾期＝到期日早於今天；
+7 天內（含今天）到期標示為即將到期。
+
+---
+
+## 四、與既有 Excel 整合
+
+### 匯入既有台帳
+
+Excel 另存為「**CSV UTF-8（逗號分隔）**」後：
+
+```bash
+python3 run.py import 既有台帳.csv
+```
+
+- 表頭可用中文（`案件編號`、`客戶名稱`、`到期日` …）或英文欄位名
+- 只有「案件編號」是必要欄位，其餘缺的欄位會帶預設值
+- 日期支援 `2026-09-20`、`2026/9/20`、`20260920`
+- 案件編號已存在者會被**更新**（加 `--no-update` 則跳過）
+- 有問題的列會逐列列出原因，其餘照常匯入
+
+### 匯出
+
+網頁上的「Excel / CSV」按鈕匯出**目前篩選結果**；命令列則可匯出全部：
+
+```bash
+python3 run.py export 案件台帳.xlsx
+python3 run.py export 未結案.csv --open-only
+```
+
+匯出的 .xlsx 到期日是**真正的 Excel 日期格式**（可直接排序、做樞紐分析），
+表頭已凍結並套用篩選器；CSV 為 UTF-8 BOM，Excel 開啟不會亂碼。
+
+---
+
+## 五、到期／逾期摘要
+
+網頁上按「本週到期摘要」，或用命令列（適合排程寄信）：
+
+```bash
+python3 run.py report                      # 印在終端機
+python3 run.py report --days 14            # 改成未來 14 天
+python3 run.py report -o 週報.xlsx          # 輸出 .txt / .csv / .xlsx
+```
+
+摘要分三段：**已逾期**、**N 日內到期**、**未設定到期日**，並附各負責人的件數統計。
+
+排程範例（每週一早上 8:00 產生週報；Linux/macOS `crontab -e`）：
+
+```
+0 8 * * 1 cd /path/to/case-tracker && python3 run.py report -o /path/to/週報_$(date +\%F).xlsx
+```
+
+---
+
+## 六、部署與維運
+
+### 常用參數
+
+```bash
+python3 run.py --port 9000                # 換埠號
+python3 run.py --host 127.0.0.1           # 只給自己用，不開放內網
+python3 run.py --db /srv/tmt/cases.db     # 指定資料庫位置
+python3 run.py --verbose                  # 印出每筆 HTTP 請求
+```
+
+亦可用環境變數 `CASE_TRACKER_DB`、`CASE_TRACKER_HOST`、`CASE_TRACKER_PORT`。
+
+### 讓服務長期執行（Linux systemd 範例）
+
+```ini
+# /etc/systemd/system/case-tracker.service
+[Unit]
+Description=TMT Case Tracker
+After=network.target
+
+[Service]
+WorkingDirectory=/srv/case-tracker
+ExecStart=/usr/bin/python3 /srv/case-tracker/run.py --db /srv/case-tracker/data/cases.db
+Restart=always
+User=tmt
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 備份
+
+資料就是 `data/cases.db` 一個檔案。**服務執行中也可以安全備份**：
+
+```bash
+sqlite3 data/cases.db ".backup '/backup/cases_$(date +%F).db'"
+```
+
+（或停掉服務後直接複製 `cases.db`、`cases.db-wal`、`cases.db-shm` 三個檔案。）
+建議每日排程備份，並保留至少 30 份。
+
+### 多人同時使用
+
+- SQLite 以 WAL 模式執行，多人讀取不互相阻塞，寫入以序列化方式處理
+- 兩人同時編輯同一件時，**後存的人會收到提示**（「此案件已由 ○○○ 於 ○○ 更新，
+  請重新載入後再編輯」），不會默默覆蓋對方的修改
+- 清單每 5 分鐘自動重新整理一次，也可自行重新整理頁面
+
+### 安全性
+
+本工具設計為**公司內網使用**，沒有帳號密碼——凡連得到這個網址的人都能編輯。
+以 20 人內部台帳而言通常足夠，但請注意：
+
+- 請勿把這個埠號對外開放到網際網路
+- 若日後需要登入驗證或唯讀權限，可在 `case_tracker/server.py` 的 `_dispatch()`
+  加上驗證，或前面掛一層 nginx basic auth
+- 所有異動都有紀錄（誰、何時、改了什麼），可透過 `/api/activity` 查看
+
+---
+
+## 七、專案結構
+
+```
+run.py                      啟動與命令列工具（serve / report / export / import / seed-demo）
+start.bat                   Windows 一鍵啟動
+case_tracker/
+  models.py                 欄位定義、選項清單、驗證、逾期判定
+  db.py                     SQLite 資料層（WAL、樂觀鎖、異動紀錄）
+  server.py                 HTTP 路由與 JSON API
+  export.py                 CSV 與 XLSX 產生器（純標準函式庫）
+  report.py                 到期／逾期摘要
+  importer.py               CSV 匯入
+  static/                   前端頁面（index.html / style.css / app.js）
+tests/test_tracker.py       單元測試與 API 測試
+data/cases.db               資料庫（首次啟動自動建立，不納入版控）
+```
+
+### API（供日後串接其他系統）
+
+| 方法 | 路徑 | 說明 |
+| --- | --- | --- |
+| GET | `/api/meta` | 選項清單、負責人／客戶清單、各狀態件數 |
+| GET | `/api/cases` | 列出案件，支援 `q` `status` `case_type` `stage` `owner` `open_only` `overdue_only` `sort` `dir` |
+| POST | `/api/cases` | 新增 |
+| GET/PUT/DELETE | `/api/cases/{id}` | 讀取／更新（帶 `rev` 做衝突偵測）／刪除 |
+| GET | `/api/cases/{id}/history` | 該案件異動紀錄 |
+| GET | `/api/report/weekly?days=7` | 到期摘要 |
+| GET | `/export/cases.xlsx` `/export/cases.csv` | 匯出（吃相同篩選參數） |
+| GET | `/export/weekly.xlsx` `.csv` `.txt` | 匯出摘要 |
+
+---
+
+## 八、測試
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+涵蓋欄位驗證、逾期判定、CRUD 與樂觀鎖、篩選與排序、CSV／XLSX 產出、
+CSV 匯入、以及 HTTP API 的成功與錯誤路徑。
