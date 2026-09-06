@@ -24,7 +24,7 @@ from .summary import build_summaries
 
 @dataclass
 class PipelineResult:
-    output_path: Path
+    output_path: Path | None
     consolidated: pd.DataFrame
     manifest: Manifest
     warnings: list[str] = field(default_factory=list)
@@ -33,8 +33,13 @@ class PipelineResult:
     manual_review_count: int = 0
 
 
-def run_pipeline(config: StudyConfig, *, output_name: str | None = None) -> PipelineResult:
-    """讀原始檔 → 套規則 → 套人工決策 → 輸出統整活頁簿。"""
+def run_pipeline(config: StudyConfig, *, output_name: str | None = None,
+                 write_output: bool = True) -> PipelineResult:
+    """讀原始檔 → 套規則 → 套人工決策 → 輸出統整活頁簿。
+
+    write_output=False 時只做計算與檢查，不碰輸出檔 —— `check` 指令用這個模式，
+    才不會在只想檢查的時候覆蓋掉同仁正在看的統整表。
+    """
     warnings: list[str] = []
     manifest = build_manifest(config.study_id, config.source_path)
 
@@ -94,22 +99,27 @@ def run_pipeline(config: StudyConfig, *, output_name: str | None = None) -> Pipe
     for entry in reference.files:
         manifest.inputs.append({**entry, "SHA-256": "", "檔案類型": entry.get("檔案類型", "參考資料")})
 
-    output_dir = config.path("output_dir")
-    filename = output_name or f"{config.study_id}_統整表.xlsx"
-    output_path = write_report(
-        output_dir / filename,
-        config=config,
-        consolidated=result.table,
-        summaries=summaries,
-        lob=lob,
-        curves_frame=_curves_frame(curves, config),
-        qc_frame=_qc_frame(qc_points),
-        organ_codes=_organ_codes_frame(config, decisions, result.table, warnings),
-        animals=_animals_frame(result.table, reference),
-        raw=wells,
-        files=manifest.inputs_frame(),
-        manifest=manifest,
-    )
+    output_path: Path | None = None
+    if write_output:
+        output_dir = config.path("output_dir")
+        filename = output_name or f"{config.study_id}_統整表.xlsx"
+        output_path = write_report(
+            output_dir / filename,
+            config=config,
+            consolidated=result.table,
+            summaries=summaries,
+            lob=lob,
+            curves_frame=_curves_frame(curves, config),
+            qc_frame=_qc_frame(qc_points),
+            organ_codes=_organ_codes_frame(config, decisions, result.table, warnings),
+            animals=_animals_frame(result.table, reference),
+            raw=wells,
+            files=manifest.inputs_frame(),
+            manifest=manifest,
+        )
+    else:
+        # 即使不輸出，仍要跑一次對照表建構，才能把「未收錄的臟器代碼」這類問題檢查出來
+        _organ_codes_frame(config, decisions, result.table, warnings)
 
     return PipelineResult(
         output_path=output_path,
