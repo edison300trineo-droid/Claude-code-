@@ -149,3 +149,18 @@ organ_codes:
   "63": {en: "Thoracic",      zh: "胸椎"}
   "64": {en: "Lymph node",    zh: "淋巴結"}
   "99": {en: "Injection site", zh: "注射處關節"}
+
+# --- 動物參考資料 (性別/採樣時間點) ---------------------------------------
+# 性別與時間點「只」從參考檔取得，不由動物編號前綴推測。
+# 找不到對應資料時欄位留白並在執行摘要提示，不猜。
+reference:
+  # 欄名對照：左邊是內部欄位，右邊是參考檔可能出現的欄名（依序比對，不分大小寫）
+  column_aliases:
+    animal_id: ["動物編號", "Animal No", "Animal No.", "Animal ID", "Animal Number", "No"]
+    sex: ["性別", "Sex", "Gender"]
+    timepoint: ["採樣時間點", "Time point", "Timepoint", "Sampling time", "Necropsy"]
+    organ_code: ["臟器代碼", "Organ code", "Tissue code"]
+  # 多個參考檔對同一動物給出不同性別/時間點時的處理：
+  #   conflict = 標記衝突並留白（預設，需人工確認）
+  #   first    = 採用第一個來源
+  on_conflict: conflict
