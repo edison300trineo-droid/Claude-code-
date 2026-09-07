@@ -54,12 +54,18 @@ class ComparisonResult:
     notes: list[str] = field(default_factory=list)
 
     @property
+    def values_match(self) -> bool:
+        """兩邊都有的列，值是否完全一致。"""
+        return self.differences.empty
+
+    @property
+    def coverage_matches(self) -> bool:
+        """兩邊涵蓋的列是否相同。分階段驗收時常常只跑部分 run。"""
+        return self.only_in_old.empty and self.only_in_new.empty
+
+    @property
     def is_clean(self) -> bool:
-        return (
-            self.only_in_old.empty
-            and self.only_in_new.empty
-            and self.differences.empty
-        )
+        return self.values_match and self.coverage_matches
 
     @property
     def differing_rows(self) -> int:
@@ -271,7 +277,8 @@ def write_comparison_report(path: str | Path, result: ComparisonResult) -> Path:
         ("差異欄位總數", len(result.differences)),
         ("只在既有統整表中的列數", len(result.only_in_old)),
         ("只在 pipeline 產出中的列數", len(result.only_in_new)),
-        ("整體結果", "完全一致" if result.is_clean else "有差異，請逐筆確認"),
+        ("重疊列的值", "完全一致" if result.values_match else "有差異，請逐筆確認"),
+        ("涵蓋範圍", "相同" if result.coverage_matches else "不同（可能只跑了部分原始檔）"),
     ], columns=["項目", "內容"])
 
     with pd.ExcelWriter(target, engine="openpyxl") as writer:

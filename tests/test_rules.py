@@ -228,3 +228,37 @@ def test_standard_point_missing_from_config_is_reported(config):
     series = {"STD01": 10000, "STD02": 2000, "STD09": 0.0256, "STD08": 0.128000006}
     curve = fit_standard_curve(_standards_with(config, series), "run.xls", config)
     assert any("STD09" in note and "沒有這一點" in note for note in curve.notes)
+
+
+# --- 孔位順序 --------------------------------------------------------------
+
+def test_wells_sort_naturally_not_as_strings():
+    """F10 必須排在 F9 之後。字串排序會把它排到前面，孔位1／孔位2 就對調了。"""
+    from qpcr_biod.parsing import well_sort_key
+
+    wells = ["F10", "F9", "A12", "A2", "A1", "H11", "B3"]
+    assert sorted(wells, key=well_sort_key) == [
+        "A1", "A2", "A12", "B3", "F9", "F10", "H11",
+    ]
+
+
+def test_unparseable_well_sorts_last_without_crashing():
+    from qpcr_biod.parsing import well_sort_key
+
+    assert sorted(["F9", "", "A1", "???"], key=well_sort_key) == ["A1", "F9", "", "???"]
+
+
+def test_well_columns_follow_plate_order_in_the_consolidated_table(study_dir, config):
+    """孔位1 必須是盤面上較前的那一孔 —— HIGHSD 選孔的決策依賴這個順序。"""
+    from qpcr_biod.parsing import well_sort_key
+    from qpcr_biod.pipeline import run_pipeline
+
+    table = run_pipeline(config).consolidated
+    paired = table[table["孔位2-Well"].notna()]
+    assert len(paired) > 0
+
+    for _, row in paired.iterrows():
+        first, second = row["孔位1-Well"], row["孔位2-Well"]
+        assert well_sort_key(first) < well_sort_key(second), (
+            f"{row['Sample Name']} 的孔位順序顛倒：{first} / {second}"
+        )

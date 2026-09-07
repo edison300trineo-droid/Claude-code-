@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -96,6 +97,21 @@ class RunFile:
         if parsed is not None:
             return parsed
         return datetime.max
+
+
+def well_sort_key(well: Any) -> tuple[str, int, str]:
+    """孔位的自然排序鍵。
+
+    孔位是「列字母＋行數字」，字串排序會把 F10 排在 F9 前面（字元 '1' < '9'），
+    於是孔位1／孔位2 對調。這不只是外觀問題 —— 決策表上的「採用孔位1」
+    會因此套用到錯誤的那一孔。
+    """
+    text = "" if well is None else str(well).strip().upper()
+    match = re.match(r"^([A-Z]+)\s*(\d+)$", text)
+    if not match:
+        # 認不出的格式排在最後，但仍然穩定
+        return ("\uffff", 0, text)
+    return (match.group(1), int(match.group(2)), "")
 
 
 def sha256_of(path: Path) -> str:

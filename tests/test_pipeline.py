@@ -46,8 +46,8 @@ def test_rerun_supersedes_original_but_original_is_kept(study_dir, config):
     table = result.consolidated
     versions = table[table["最終列比對Key(輔助)"] == "1011|03"]
     assert len(versions) == 2, "原始版本必須保留供追溯，不能被刪掉"
-    assert set(versions["版本"]) == {"原始", "rerun"}
-    assert versions[versions["版本"] == "rerun"].iloc[0]["最終採用"] == "Y"
+    assert set(versions["版本"]) == {"原始", "Rerun"}
+    assert versions[versions["版本"] == "Rerun"].iloc[0]["最終採用"] == "Y"
     assert versions[versions["版本"] == "原始"].iloc[0]["最終採用"] == "N"
 
 

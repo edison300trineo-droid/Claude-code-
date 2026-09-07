@@ -112,3 +112,16 @@ def test_escalated_key_still_detects_a_difference_on_one_version(study_dir, conf
     result = compare_tables(table, modified)
     assert result.differing_rows == 1
     assert "1014_22_re" in result.differences.iloc[0]["對照鍵"]
+
+
+def test_subset_run_reports_matching_values_separately_from_coverage(study_dir, config):
+    """分階段驗收：只放部分原始檔時，值一致不該被講成「有差異」。"""
+    table = run_pipeline(config).consolidated
+    subset = table[table["來源檔案"].str.contains("_01_")]
+
+    result = compare_tables(table, subset)
+    assert result.values_match, "重疊的列值應完全一致"
+    assert not result.coverage_matches
+    assert not result.is_clean
+    assert len(result.only_in_old) > 0
+    assert len(result.only_in_new) == 0

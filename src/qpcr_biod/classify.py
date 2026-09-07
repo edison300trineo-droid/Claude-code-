@@ -10,6 +10,11 @@ import pandas as pd
 from .config import StudyConfig
 
 
+# 版本標籤沿用既有統整表的寫法，對帳時才不會整批顯示為文字不一致
+ORIGINAL_LABEL = "原始"
+RERUN_LABEL = "Rerun"
+
+
 class SampleClass(str, Enum):
     STANDARD = "標準品(標準曲線點)"
     ANIMAL = "動物檢體"
@@ -118,7 +123,7 @@ def annotate_wells(wells: pd.DataFrame, config: StudyConfig) -> pd.DataFrame:
 
 def resolve_reruns(wells: pd.DataFrame, run_order: dict[str, int],
                    config: StudyConfig) -> pd.DataFrame:
-    """標記每個檢體版本是「原始」還是「rerun」。
+    """標記每個檢體版本是「原始」還是「Rerun」。
 
     版本的身分是 (來源檔案, Sample Name)，不是 (來源檔案) —— 因為 rerun 有兩種
     形式，而且可能同時出現：
@@ -126,11 +131,11 @@ def resolve_reruns(wells: pd.DataFrame, run_order: dict[str, int],
       1. 名稱後綴：同一塊盤上有 `1011_03` 與 `1011_03_re`
       2. 較晚的 run：同一 動物_臟器 在後面的檔案又跑了一次
 
-    以檔案為單位判定會把同盤的兩個版本併成一筆，並把原始那筆也誤標成 rerun。
+    以檔案為單位判定會把同盤的兩個版本併成一筆，並把原始那筆也誤標成 Rerun。
     第 2 條可由設定關閉。
     """
     frame = wells.copy()
-    frame["version"] = "原始"
+    frame["version"] = ORIGINAL_LABEL
     frame["rerun_basis"] = ""
     frame["run_order"] = frame["source_file"].map(run_order).fillna(0).astype(int)
 
@@ -161,7 +166,7 @@ def resolve_reruns(wells: pd.DataFrame, run_order: dict[str, int],
                 & (frame["source_file"] == version.source_file)
                 & (frame["sample_name"] == version.sample_name)
             )
-            frame.loc[mask, "version"] = "rerun"
+            frame.loc[mask, "version"] = RERUN_LABEL
             frame.loc[mask, "rerun_basis"] = "、".join(basis)
 
     return frame

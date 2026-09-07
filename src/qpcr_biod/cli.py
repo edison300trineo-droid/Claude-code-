@@ -160,7 +160,21 @@ def _run_compare(config, args) -> int:
         print("\n結果：完全一致。pipeline 重現了既有統整表。")
         return 0
 
-    print("\n結果：有差異。以下列出前 15 筆，完整清單請看對照報告。")
+    if comparison.values_match:
+        # 分階段驗收時很常見：只放了部分原始檔，值卻是對的
+        print(
+            f"\n結果：兩邊都有的 {comparison.matched} 列，值完全一致。"
+            "\n但兩邊涵蓋的列不同："
+        )
+        if len(comparison.only_in_old):
+            print(f"  • 只在既有表：{len(comparison.only_in_old)} 列"
+                  "（若 data/raw 尚未放齊全部原始檔，這是預期的）")
+        if len(comparison.only_in_new):
+            print(f"  • 只在 pipeline：{len(comparison.only_in_new)} 列"
+                  "（既有表沒有這些列，請確認是不是新資料）")
+        return 0
+
+    print("\n結果：有值不一致。以下列出前 15 筆，完整清單請看對照報告。")
     for _, row in comparison.differences.head(15).iterrows():
         print(f"  {row['對照鍵']} | {row['欄位']}")
         print(f"      既有={row['既有統整表']}  pipeline={row['pipeline產出']}  {row['差異']}")

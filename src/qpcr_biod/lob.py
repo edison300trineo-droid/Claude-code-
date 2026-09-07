@@ -19,6 +19,7 @@ import pandas as pd
 
 from .classify import SampleClass
 from .config import StudyConfig
+from .parsing import well_sort_key
 
 
 @dataclass
@@ -126,8 +127,13 @@ def _baseline_wells(wells: pd.DataFrame, baseline: pd.DataFrame,
             "孔位": well["well"],
             "Quantity (pg)": well["quantity"],
         })
-    return pd.DataFrame(rows).sort_values(["動物編號", "孔位"]).reset_index(drop=True) \
-        if rows else pd.DataFrame(columns=["動物編號", "Sample Name", "來源檔案(Run)", "孔位", "Quantity (pg)"])
+    if not rows:
+        return pd.DataFrame(
+            columns=["動物編號", "Sample Name", "來源檔案(Run)", "孔位", "Quantity (pg)"]
+        )
+    frame = pd.DataFrame(rows)
+    frame["_well"] = frame["孔位"].map(well_sort_key)
+    return frame.sort_values(["動物編號", "_well"]).drop(columns="_well").reset_index(drop=True)
 
 
 def _compare(blood: pd.DataFrame, result: LOBResult,

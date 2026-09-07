@@ -18,7 +18,7 @@ def test_same_plate_named_rerun_becomes_its_own_row(study_dir, config):
 
     assert len(versions) == 2
     assert list(versions["Sample Name"]) == ["1014_22", "1014_22_re"]
-    assert list(versions["版本"]) == ["原始", "rerun"]
+    assert list(versions["版本"]) == ["原始", "Rerun"]
     # 每一列都只含自己的兩個孔位，沒有把四孔混在一起
     assert list(versions["孔位數"]) == [2, 2]
     assert versions.iloc[0]["Quantity Mean 定量平均值"] != versions.iloc[1]["Quantity Mean 定量平均值"]
@@ -48,7 +48,7 @@ def test_later_run_rerun_is_detected_by_position(study_dir, config):
     versions = _versions(table, "1011|03")
 
     assert len(versions) == 2
-    rerun = versions[versions["版本"] == "rerun"].iloc[0]
+    rerun = versions[versions["版本"] == "Rerun"].iloc[0]
     assert rerun["rerun判定依據"] == "較晚的run"
     assert rerun["最終採用"] == "Y"
     assert rerun["來源檔案"] == "20260824_BD-TS-20260701_07_data.xls"

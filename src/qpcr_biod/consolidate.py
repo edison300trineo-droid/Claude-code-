@@ -7,10 +7,11 @@ from typing import Any
 
 import pandas as pd
 
-from .classify import SampleClass
+from .classify import ORIGINAL_LABEL, RERUN_LABEL, SampleClass
 from .config import StudyConfig
 from .curves import StandardCurve
 from .decisions import DecisionSet, resolve_decision
+from .parsing import well_sort_key
 from .reference import ReferenceData
 
 # 列的視覺標記，交給 report 決定實際底色
@@ -70,7 +71,8 @@ def _build_row(animal_id: str, organ_code: str, source_file: str,
                reference: ReferenceData, decisions: DecisionSet,
                config: StudyConfig, unit: str, nd_label: str,
                warnings: list[str]) -> dict[str, Any]:
-    wells_sorted = group.sort_values("well")
+    # 自然排序：F9 要排在 F10 前面，孔位1／孔位2 才對得上儀器的盤面順序
+    wells_sorted = group.loc[group["well"].map(well_sort_key).sort_values().index]
     quantity_mean = _instrument_or_computed(group, "quantity_mean", "quantity")
     ct_mean = _instrument_or_computed(group, "ct_mean", "ct")
 
@@ -157,9 +159,9 @@ def _first(group: pd.DataFrame, column: str):
 
 def _version_of(group: pd.DataFrame) -> str:
     if "version" not in group.columns:
-        return "原始"
+        return ORIGINAL_LABEL
     values = group["version"].dropna()
-    return str(values.iloc[0]) if not values.empty else "原始"
+    return str(values.iloc[0]) if not values.empty else ORIGINAL_LABEL
 
 
 def _organ_names(organ_code: str, decisions: DecisionSet,
@@ -282,7 +284,7 @@ def _finalise_highsd(table: pd.DataFrame, decisions: DecisionSet,
     可定量 -> 請人工複核；ND -> 屬預期現象（低濃度時孔間微小差異易觸發 HIGHSD）。
     """
     frame = table.copy()
-    keys_with_rerun = set(frame.loc[frame["版本"] == "rerun", "最終列比對Key(輔助)"])
+    keys_with_rerun = set(frame.loc[frame["版本"] == RERUN_LABEL, "最終列比對Key(輔助)"])
 
     presentation: list[Any] = []
     review_state: list[str] = []
