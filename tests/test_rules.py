@@ -262,3 +262,50 @@ def test_well_columns_follow_plate_order_in_the_consolidated_table(study_dir, co
         assert well_sort_key(first) < well_sort_key(second), (
             f"{row['Sample Name']} 的孔位順序顛倒：{first} / {second}"
         )
+
+
+# --- 空孔位 ----------------------------------------------------------------
+
+def test_well_without_a_sample_name_is_an_empty_well_not_unclassified(config):
+    """96 孔盤沒排滿是常態，空孔不該被報成「無法歸類的命名規則」。"""
+    identity = classify_sample("", "UNKNOWN", config)
+    assert identity.sample_class is SampleClass.EMPTY_WELL
+
+    for blank in ("   ", None):
+        assert classify_sample(blank, "UNKNOWN", config).sample_class is SampleClass.EMPTY_WELL
+
+
+def test_empty_wells_are_reported_as_normal_not_as_a_config_problem(study_dir, config):
+    from qpcr_biod.pipeline import run_pipeline
+
+    raw = study_dir / "data/raw/20260818_BD-TS-20260701_01_data.xls"
+    lines = raw.read_text(encoding="utf-8").rstrip("\n").split("\n")
+    header_index = next(i for i, line in enumerate(lines) if line.startswith("Well\t"))
+    width = len(lines[header_index].split("\t"))
+    # 補兩個沒有樣品名稱的孔位，模擬盤面未排滿
+    for well in ("H11", "H12"):
+        lines.append("\t".join([well] + [""] * (width - 1)))
+    raw.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    result = run_pipeline(config)
+    empty_notes = [w for w in result.warnings if "空孔" in w]
+    assert len(empty_notes) == 1
+    assert "2 個孔位" in empty_notes[0]
+    assert "正常現象" in empty_notes[0]
+    # 不該再出現那則指向設定檔的誤導訊息
+    assert not any("無法歸類到任何檢體類別" in w for w in result.warnings)
+
+
+def test_empty_wells_do_not_reach_the_consolidated_table(study_dir, config):
+    from qpcr_biod.pipeline import run_pipeline
+
+    before = len(run_pipeline(config).consolidated)
+
+    raw = study_dir / "data/raw/20260818_BD-TS-20260701_01_data.xls"
+    lines = raw.read_text(encoding="utf-8").rstrip("\n").split("\n")
+    header_index = next(i for i, line in enumerate(lines) if line.startswith("Well\t"))
+    width = len(lines[header_index].split("\t"))
+    lines.append("\t".join(["H12"] + [""] * (width - 1)))
+    raw.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    assert len(run_pipeline(config).consolidated) == before

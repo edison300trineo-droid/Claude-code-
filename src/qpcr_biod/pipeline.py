@@ -9,7 +9,7 @@ from typing import Any
 import pandas as pd
 
 from .batches import build_batch_tables
-from .classify import annotate_wells, resolve_reruns
+from .classify import SampleClass, annotate_wells, resolve_reruns
 from .config import StudyConfig
 from .consolidate import build_consolidated
 from .curves import StandardCurve, fit_all_curves
@@ -68,7 +68,14 @@ def run_pipeline(config: StudyConfig, *, output_name: str | None = None,
     run_order = {run.filename: index for index, run in enumerate(runs)}
     wells = resolve_reruns(wells, run_order, config)
 
-    unclassified = wells[wells["sample_class"] == "未分類"]
+    empty_wells = int((wells["sample_class"] == SampleClass.EMPTY_WELL.value).sum())
+    if empty_wells:
+        warnings.append(
+            f"有 {empty_wells} 個孔位沒有樣品名稱（盤面未排滿的空孔），"
+            "已保留於 Raw_Import 但不納入統整。此為正常現象。"
+        )
+
+    unclassified = wells[wells["sample_class"] == SampleClass.UNKNOWN.value]
     for name in sorted(set(unclassified["sample_name"].dropna())):
         warnings.append(
             f"樣品名稱「{name}」無法歸類到任何檢體類別，該孔位僅保留於 Raw_Import，"

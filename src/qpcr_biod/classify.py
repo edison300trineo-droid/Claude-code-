@@ -22,6 +22,7 @@ class SampleClass(str, Enum):
     MATRIX_QC = "臟器基質QC對照組"
     NTC = "陰性對照(NTC)"
     STD_ACCURACY = "已知濃度回推QC"
+    EMPTY_WELL = "未使用孔位"
     UNKNOWN = "未分類"
 
 
@@ -46,8 +47,10 @@ def classify_sample(sample_name: str, task: str, config: StudyConfig) -> SampleI
     name = (sample_name or "").strip()
     task_upper = (task or "").strip().upper()
 
+    # 96 孔盤不一定排滿，沒有樣品名稱的孔位就是空孔 —— 那是正常的盤面配置，
+    # 不是無法辨識的命名規則，別讓它每次執行都跳出一則假警報。
     if not name:
-        return SampleIdentity(SampleClass.UNKNOWN)
+        return SampleIdentity(SampleClass.EMPTY_WELL)
 
     # NTC 先判，因為它的 task 就叫 NTC
     ntc_names = {n.upper() for n in config.qc.get("ntc", {}).get("names", ["NTC"])}
