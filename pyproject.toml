@@ -8,8 +8,9 @@ version = "0.1.0"
 description = "Alu qPCR biodistribution consolidation pipeline (BD-TS series)"
 requires-python = ">=3.10"
 dependencies = [
+    # numpy 不再直接使用（標準曲線改為純 Python 回歸）；
+    # 它目前仍會隨 pandas 一併安裝。
     "pandas>=2.0",
-    "numpy>=1.24",
     "openpyxl>=3.1",
     "xlrd>=2.0",
     "PyYAML>=6.0",

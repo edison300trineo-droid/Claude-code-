@@ -90,7 +90,7 @@ def verify_imports() -> int:
     """
     step(3, "確認套件可以載入...")
     probe = (
-        "import pandas, numpy, openpyxl, xlrd, yaml; "
+        "import pandas, openpyxl, xlrd, yaml; "
         "print(pandas.__version__)"
     )
     result = subprocess.run(

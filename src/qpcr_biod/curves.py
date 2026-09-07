@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-import numpy as np
 import pandas as pd
 
 from .classify import SampleClass
@@ -70,11 +69,11 @@ def fit_standard_curve(wells: pd.DataFrame, source_file: str,
         grouped = points.groupby("std_point", dropna=True).agg(
             quantity=("quantity", "first"), ct=("ct", "mean")
         )
-        x_values = grouped["quantity"].astype(float).to_numpy()
-        y_values = grouped["ct"].astype(float).to_numpy()
+        x_values = [float(v) for v in grouped["quantity"]]
+        y_values = [float(v) for v in grouped["ct"]]
     elif basis == "well":
-        x_values = points["quantity"].astype(float).to_numpy()
-        y_values = points["ct"].astype(float).to_numpy()
+        x_values = [float(v) for v in points["quantity"]]
+        y_values = [float(v) for v in points["ct"]]
     else:
         notes.append(
             f"設定檔的 fit_basis 值「{basis}」無法辨識，本次改用 point_mean。"
@@ -82,8 +81,8 @@ def fit_standard_curve(wells: pd.DataFrame, source_file: str,
         grouped = points.groupby("std_point", dropna=True).agg(
             quantity=("quantity", "first"), ct=("ct", "mean")
         )
-        x_values = grouped["quantity"].astype(float).to_numpy()
-        y_values = grouped["ct"].astype(float).to_numpy()
+        x_values = [float(v) for v in grouped["quantity"]]
+        y_values = [float(v) for v in grouped["ct"]]
 
     n_used = len(x_values)
     if n_used < 3:
@@ -93,13 +92,13 @@ def fit_standard_curve(wells: pd.DataFrame, source_file: str,
             False, False, notes,
         )
 
-    x = np.log10(x_values)
-    y = y_values
-    slope, intercept = np.polyfit(x, y, 1)
+    x = [math.log10(value) for value in x_values]
+    y = list(y_values)
+    slope, intercept = _least_squares(x, y)
 
-    predicted = slope * x + intercept
-    ss_res = float(np.sum((y - predicted) ** 2))
-    ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+    mean_y = sum(y) / len(y)
+    ss_res = sum((yi - (slope * xi + intercept)) ** 2 for xi, yi in zip(x, y))
+    ss_tot = sum((yi - mean_y) ** 2 for yi in y)
     r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else None
 
     efficiency = None
@@ -130,6 +129,23 @@ def fit_standard_curve(wells: pd.DataFrame, source_file: str,
         efficiency_pass=eff_pass,
         notes=notes,
     )
+
+
+def _least_squares(x: list[float], y: list[float]) -> tuple[float, float]:
+    """一元線性最小平方法，回傳 (斜率, 截距)。
+
+    標準曲線只有 8 個點，用不著 numpy —— 而且企業的應用程式控制原則常封鎖
+    numpy 帶的編譯擴充，少一個編譯相依就少一處會被擋的地方。
+    """
+    n = len(x)
+    mean_x = sum(x) / n
+    mean_y = sum(y) / n
+    sxx = sum((xi - mean_x) ** 2 for xi in x)
+    if sxx == 0:
+        raise ValueError("標準曲線的所有濃度相同，無法回歸。")
+    sxy = sum((xi - mean_x) * (yi - mean_y) for xi, yi in zip(x, y))
+    slope = sxy / sxx
+    return slope, mean_y - slope * mean_x
 
 
 def _check_nominal_concentrations(standards: pd.DataFrame, config: StudyConfig,
