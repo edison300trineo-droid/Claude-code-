@@ -13,6 +13,7 @@ from typing import Any
 import pandas as pd
 
 from .config import StudyConfig
+from .official_table import parse_official_table
 
 
 @dataclass
@@ -29,6 +30,11 @@ class ReferenceData:
     animals: dict[str, AnimalRecord] = field(default_factory=dict)
     files: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # 以下三項只有官方「上機編號_說明」對照表會提供
+    organ_codes: dict[str, dict[str, str]] = field(default_factory=dict)
+    batches: dict[str, list[str]] = field(default_factory=dict)
+    run_schedule: list[dict[str, Any]] = field(default_factory=list)
+    official_files: list[str] = field(default_factory=list)
 
     def sex_of(self, animal_id: str) -> str:
         record = self.animals.get(animal_id)
@@ -94,7 +100,17 @@ def load_reference(reference_dir: str | Path, config: StudyConfig) -> ReferenceD
         return data
 
     for path in candidates:
-        rows_used = _ingest_file(path, aliases, on_conflict, data)
+        official_rows = _ingest_official(path, config, on_conflict, data)
+        if official_rows:
+            data.files.append({
+                "檔案名稱": path.name,
+                "檔案類型": "官方上機編號對照表",
+                "資料筆數": official_rows,
+                "狀態": "已匯入（動物分組/性別、臟器代碼、批次與Run排程）",
+            })
+            continue
+
+        rows_used = _ingest_file(path, aliases, on_conflict, config, data)
         data.files.append({
             "檔案名稱": path.name,
             "檔案類型": "動物分組/性別參考資料",
@@ -105,8 +121,48 @@ def load_reference(reference_dir: str | Path, config: StudyConfig) -> ReferenceD
     return data
 
 
+def _ingest_official(path: Path, config: StudyConfig, on_conflict: str,
+                     data: ReferenceData) -> int:
+    """嘗試以官方對照表的格式解析。
+
+    那份檔案的性別是靠「動物編號寫在 M 欄還是 F 欄」表示的，欄名比對抓不到，
+    所以要用專門的解析器。解析不出動物就代表這不是官方對照表，回傳 0 讓
+    呼叫端改用一般的欄名比對。
+    """
+    if path.suffix.lower() not in {".xlsx", ".xlsm"}:
+        return 0
+    try:
+        table = parse_official_table(path)
+    except Exception:  # noqa: BLE001 - 不是這個格式就換一種讀法，不該中斷流程
+        return 0
+    if not table.animals:
+        return 0
+
+    data.official_files.append(path.name)
+    data.warnings.extend(f"[{path.name}] {w}" for w in table.warnings)
+
+    for animal_id, record in table.animals.items():
+        _merge_animal(
+            data, animal_id, record.get("sex", ""),
+            config.normalize_timepoint(record.get("timepoint", "")),
+            path.name, on_conflict,
+        )
+
+    for code, names in table.organ_codes.items():
+        data.organ_codes.setdefault(code, names)
+    for name, codes in table.batches.items():
+        data.batches.setdefault(name, codes)
+    for entry in table.run_schedule:
+        data.run_schedule.append({
+            **entry,
+            "timepoint": config.normalize_timepoint(entry.get("timepoint", "")),
+        })
+
+    return len(table.animals)
+
+
 def _ingest_file(path: Path, aliases: dict[str, list[str]], on_conflict: str,
-                 data: ReferenceData) -> int:
+                 config: StudyConfig, data: ReferenceData) -> int:
     try:
         if path.suffix.lower() == ".csv":
             frames = {path.stem: pd.read_csv(path, dtype=object)}
@@ -135,7 +191,7 @@ def _ingest_file(path: Path, aliases: dict[str, list[str]], on_conflict: str,
             if not animal_id:
                 continue
             sex = _norm_text(row.get(sex_col)) if sex_col else ""
-            timepoint = _norm_text(row.get(tp_col)) if tp_col else ""
+            timepoint = config.normalize_timepoint(row.get(tp_col)) if tp_col else ""
             if not sex and not timepoint:
                 continue
             _merge_animal(data, animal_id, sex, timepoint, origin, on_conflict)

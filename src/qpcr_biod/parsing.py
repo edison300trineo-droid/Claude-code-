@@ -19,6 +19,22 @@ from typing import Any
 
 import pandas as pd
 
+# StepOnePlus 的表頭把 Ct 寫成 "Cт" —— 那個 т 是西里爾字母 U+0442，不是拉丁 t。
+# 逐一猜變體會漏（"Cт Mean"、"Cт SD" 都中招），所以比對前先做同形字正規化。
+HOMOGLYPHS = str.maketrans({
+    "\u0430": "a", "\u0435": "e", "\u043e": "o", "\u0440": "p", "\u0441": "c",
+    "\u0442": "t", "\u0445": "x", "\u0443": "y", "\u0456": "i", "\u0458": "j",
+    "\u0410": "A", "\u0415": "E", "\u041e": "O", "\u0420": "P", "\u0421": "C",
+    "\u0422": "T", "\u0425": "X", "\u041c": "M", "\u041d": "H", "\u041a": "K",
+    "\u0412": "B", "\u0406": "I",
+})
+
+
+def normalize_header(name: str) -> str:
+    """把表頭正規化成可比對的鍵：同形字轉拉丁、收斂空白、轉小寫。"""
+    return " ".join(str(name).translate(HOMOGLYPHS).split()).lower()
+
+
 # 儀器欄位 -> 內部欄位。缺的欄位一律補 None，不讓下游 KeyError。
 COLUMN_ALIASES: dict[str, str] = {
     "well": "well",
@@ -27,7 +43,6 @@ COLUMN_ALIASES: dict[str, str] = {
     "target name": "target_name",
     "task": "task",
     "ct": "ct",
-    "cт": "ct",
     "ct mean": "ct_mean",
     "ct sd": "ct_sd",
     "quantity": "quantity",
@@ -165,7 +180,7 @@ def _read_delimited_text(path: Path) -> list[list[str]]:
 
 def _find_header_index(rows: list[list[str]]) -> int:
     for idx, row in enumerate(rows):
-        lowered = {cell.strip().lower() for cell in row if cell}
+        lowered = {normalize_header(cell) for cell in row if cell}
         if "well" in lowered and "sample name" in lowered:
             return idx
     raise ParseError("找不到表頭列（需同時含 'Well' 與 'Sample Name'）")
@@ -212,7 +227,7 @@ def read_run_file(path: str | Path) -> RunFile:
     mapped: list[str] = []
     seen: set[str] = set()
     for raw_name in header:
-        key = raw_name.strip().lower()
+        key = normalize_header(raw_name)
         name = COLUMN_ALIASES.get(key)
         if name is None:
             name = key.replace(" ", "_") if key else f"col_{len(mapped)}"

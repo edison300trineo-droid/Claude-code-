@@ -28,28 +28,49 @@ class BatchTables:
 
 
 def build_batch_tables(wells: pd.DataFrame, consolidated: pd.DataFrame,
-                       run_order: dict[str, int],
-                       config: StudyConfig) -> BatchTables:
+                       run_order: dict[str, int], config: StudyConfig,
+                       reference=None) -> BatchTables:
+    """官方對照表若提供了批次與排程就以它為準，設定檔只是沒有官方檔時的備援。"""
     tables = BatchTables()
-    batches = config.raw.get("batches") or {}
+
+    official_batches = dict(getattr(reference, "batches", {}) or {})
+    official_schedule = list(getattr(reference, "run_schedule", []) or [])
+
+    if official_batches:
+        batches = official_batches
+        tables.notes.append(
+            "批次組成取自官方上機編號對照表"
+            f"（{'、'.join(getattr(reference, 'official_files', []) or ['官方檔'])}）。"
+        )
+    else:
+        batches = config.raw.get("batches") or {}
+        if batches:
+            tables.notes.append(
+                "參考資料夾中沒有官方上機編號對照表，批次組成改用設定檔的定義，請核對。"
+            )
+
     if not batches:
-        tables.notes.append("設定檔未定義 batches，未產生批次與上機編號進度表。")
+        tables.notes.append("設定檔與官方對照表都沒有批次定義，未產生批次與上機編號進度表。")
         return tables
 
-    tables.composition = _composition(batches, config)
-    tables.progress = _progress(wells, consolidated, run_order, batches, config,
-                                tables.notes)
+    schedule = official_schedule or (config.raw.get("run_schedule") or {}).get("official") or []
+    tables.composition = _composition(batches, config, reference)
+    tables.progress = _progress(wells, consolidated, run_order, batches, schedule,
+                                config, tables.notes)
     return tables
 
 
-def _composition(batches: dict[str, list[str]], config: StudyConfig) -> pd.DataFrame:
+def _composition(batches: dict[str, list[str]], config: StudyConfig,
+                 reference=None) -> pd.DataFrame:
+    official_organs = dict(getattr(reference, "organ_codes", {}) or {})
     rows: list[dict[str, Any]] = []
     for name, codes in batches.items():
         row: dict[str, Any] = {"批次(Batch)": name}
         for index, code in enumerate(codes, start=1):
             code = str(code)
-            english = config.organ_name(code, "en")
-            chinese = config.organ_name(code, "zh")
+            names = official_organs.get(code)
+            english = names.get("en") if names else config.organ_name(code, "en")
+            chinese = names.get("zh") if names else config.organ_name(code, "zh")
             row[f"臟器代碼{index}"] = code
             row[f"臟器名稱{index}"] = (
                 f"{chinese} / {english}" if chinese or english else "(尚未收錄)"
@@ -60,12 +81,12 @@ def _composition(batches: dict[str, list[str]], config: StudyConfig) -> pd.DataF
 
 def _progress(wells: pd.DataFrame, consolidated: pd.DataFrame,
               run_order: dict[str, int], batches: dict[str, list[str]],
-              config: StudyConfig, notes: list[str]) -> pd.DataFrame:
-    schedule = config.raw.get("run_schedule") or {}
-    official = schedule.get("official") or []
+              schedule: list[dict[str, Any]], config: StudyConfig,
+              notes: list[str]) -> pd.DataFrame:
     official_index = {
-        (str(entry.get("batch")), str(entry.get("timepoint"))): entry.get("run")
-        for entry in official
+        (str(entry.get("batch")), config.normalize_timepoint(entry.get("timepoint"))):
+            entry.get("run")
+        for entry in schedule
     }
 
     animals = wells[wells["sample_class"] == SampleClass.ANIMAL.value]

@@ -115,8 +115,31 @@ class StudyConfig:
         """設定檔標稱濃度與儀器實際輸出的相對容差。"""
         return float(self.standard_curve.get("nominal_tolerance", 0.001))
 
+    def normalize_timepoint(self, timepoint: Any) -> str:
+        """把不同來源的時間點寫法收斂成同一種。
+
+        官方對照表寫 "Pre-dose" / "Day 02"，統整表用 "Predose" / "Day 2"。
+        不收斂的話同一個時間點會被當成兩個，Mean/SD 就被拆散了。
+        """
+        text = "" if timepoint is None else str(timepoint).strip()
+        if not text:
+            return ""
+
+        aliases = self.raw.get("timepoint_aliases") or {}
+        lowered = {str(k).strip().lower(): str(v) for k, v in aliases.items()}
+        hit = lowered.get(text.lower())
+        if hit is not None:
+            return hit
+
+        # Day 02 -> Day 2（去掉前導零，但保留 Day 15 這種兩位數）
+        match = re.match(r"^\s*day\s*0*(\d+)\s*$", text, re.IGNORECASE)
+        if match:
+            return f"Day {int(match.group(1))}"
+        return text
+
     def timepoint_sort_key(self, timepoint: str) -> tuple[int, str]:
         """未列在 timepoint_order 的時間點排到最後，但仍穩定排序。"""
+        timepoint = self.normalize_timepoint(timepoint)
         order = self.timepoint_order
         try:
             return (order.index(timepoint), "")
@@ -128,6 +151,7 @@ class StudyConfig:
 
         同一時間點對應到多個組別時回傳 ambiguous_label，絕不猜測。
         """
+        timepoint = self.normalize_timepoint(timepoint)
         groups = self.raw.get("groups", {})
         ambiguous = str(groups.get("ambiguous_label", "待確認"))
         matches = [

@@ -96,7 +96,8 @@ def run_pipeline(config: StudyConfig, *, output_name: str | None = None,
     summaries = build_summaries(result.table, lob, config)
 
     # 6. 批次與上機編號進度
-    batch_tables = build_batch_tables(wells, result.table, run_order, config)
+    batch_tables = build_batch_tables(wells, result.table, run_order, config,
+                                      reference)
     warnings.extend(batch_tables.notes)
 
     # 7. 輸出
@@ -116,7 +117,8 @@ def run_pipeline(config: StudyConfig, *, output_name: str | None = None,
             lob=lob,
             curves_frame=_curves_frame(curves, config),
             qc_frame=_qc_frame(qc_points),
-            organ_codes=_organ_codes_frame(config, decisions, result.table, warnings),
+            organ_codes=_organ_codes_frame(config, decisions, reference,
+                                           result.table, warnings),
             animals=_animals_frame(result.table, reference),
             raw=wells,
             files=manifest.inputs_frame(),
@@ -125,7 +127,7 @@ def run_pipeline(config: StudyConfig, *, output_name: str | None = None,
         )
     else:
         # 即使不輸出，仍要跑一次對照表建構，才能把「未收錄的臟器代碼」這類問題檢查出來
-        _organ_codes_frame(config, decisions, result.table, warnings)
+        _organ_codes_frame(config, decisions, reference, result.table, warnings)
 
     return PipelineResult(
         output_path=output_path,
@@ -214,18 +216,24 @@ def _qc_frame(qc_points) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _organ_codes_frame(config: StudyConfig, decisions: DecisionSet,
+def _organ_codes_frame(config: StudyConfig, decisions: DecisionSet, reference,
                        consolidated: pd.DataFrame, warnings: list[str]) -> pd.DataFrame:
+    """來源優先序：人工決策 > 官方對照表 > 設定檔。"""
     seen = set(consolidated["臟器代碼"].dropna()) if not consolidated.empty else set()
     known = config.organ_codes
+    official = dict(getattr(reference, "organ_codes", {}) or {})
     rows: list[dict[str, Any]] = []
 
-    for code in sorted(set(known) | set(decisions.organ_override) | seen):
+    for code in sorted(set(known) | set(official) | set(decisions.organ_override) | seen):
         override = decisions.organ_override.get(code)
         if override:
             english, chinese, source = override.get("en", ""), override.get("zh", ""), (
                 f"決策表補充（{override['覆核者']} / {override['覆核日期']}）"
             )
+        elif code in official:
+            english = official[code].get("en", "")
+            chinese = official[code].get("zh", "")
+            source = "官方上機編號對照表"
         elif code in known:
             english, chinese = known[code].get("en", ""), known[code].get("zh", "")
             source = "設定檔（官方上機編號對照表）"
