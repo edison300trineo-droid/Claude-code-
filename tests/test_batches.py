@@ -85,7 +85,9 @@ def test_organs_spanning_two_batches_are_reported_not_forced(config):
     row = tables.progress.iloc[0]
 
     assert row["批次(Batch)"] == "(無法對應)"
-    assert any("無法對應到設定檔中任何一個批次" in note for note in tables.notes)
+    assert any("不屬於官方排程的任一批次" in note for note in tables.notes)
+    # 常態現象不該被寫成待辦事項
+    assert not any("請人工確認" in note for note in tables.notes)
 
 
 def test_multiple_timepoints_in_one_file_are_flagged(config):
@@ -97,6 +99,7 @@ def test_multiple_timepoints_in_one_file_are_flagged(config):
     tables = build_batch_tables(wells, consolidated, {"run01.xls": 0}, config)
 
     assert any("多個採樣時間點" in note for note in tables.notes)
+    assert any("屬正常" in note for note in tables.notes)
     assert tables.progress.iloc[0]["批次/時間點資料來源"] == SOURCE_INFERRED
 
 

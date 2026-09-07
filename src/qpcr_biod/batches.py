@@ -115,15 +115,18 @@ def _progress(wells: pd.DataFrame, consolidated: pd.DataFrame,
             "本檔出現的臟器代碼": "、".join(codes) or "(無動物檢體)",
         })
 
+        # 實務上同一盤常會補做計畫外的臟器，所以跨批次與多時間點都是常態。
+        # 這些只是「此 Run 不對應官方排程的單一格子」的說明，不是待辦事項 ——
+        # 把常態寫成「請人工確認」，久了會讓人學會忽略所有警告。
         if batch is None and codes:
             notes.append(
-                f"{source_file} 出現的臟器代碼（{'、'.join(codes)}）"
-                "無法對應到設定檔中任何一個批次，請確認 batches 設定或該檔內容。"
+                f"{source_file} 的臟器組合（{'、'.join(codes)}）不屬於官方排程的任一批次，"
+                "Run 編號改由匯入資料推定。同一盤補做計畫外臟器時屬正常。"
             )
         if len(file_timepoints) > 1:
             notes.append(
                 f"{source_file} 內含多個採樣時間點（{'、'.join(file_timepoints)}），"
-                "無法對應到單一 Run 排程，請人工確認。"
+                "未對應到官方排程的單一時間點。同一盤混合不同時間點時屬正常。"
             )
 
     notes.append(
