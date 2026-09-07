@@ -7,3 +7,8 @@ dist/
 .venv/
 output/
 *.local.yaml
+data/decisions.xlsx
+data/raw/*.xls
+data/raw/*.xlsx
+data/reference/*.xls
+data/reference/*.xlsx
