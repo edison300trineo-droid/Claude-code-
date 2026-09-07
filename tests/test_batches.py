@@ -117,3 +117,36 @@ def test_inference_is_always_disclosed(config):
     tables = _progress(config, {"run01.xls": ["99", "03", "64"]},
                        {"run01.xls": "Predose"})
     assert any("Run 編號為推定值" in note for note in tables.notes)
+
+
+# --- 可互換的臟器代碼（睪丸 25 / 卵巢 11 共用同一個上機位置）----------------
+
+@pytest.mark.parametrize("codes, label", [
+    (["04", "25", "01"], "全部為睪丸"),
+    (["04", "11", "01"], "全部為卵巢"),
+    (["04", "25", "11", "01"], "同盤混合"),
+])
+def test_gonad_slot_accepts_testis_ovaries_or_both(config, codes, label):
+    tables = _progress(config, {"run01.xls": codes}, {"run01.xls": "Predose"})
+    row = tables.progress.iloc[0]
+    assert row["批次(Batch)"] == "04+25+01", f"{label} 應該對應到同一個批次"
+    assert row["批次比對"] == "完全相符", (
+        f"{label}：性腺位置有做到就算完整，不該說成漏了另一個代碼"
+        f"（實得 {row['批次比對']!r}）"
+    )
+    assert not any("不屬於官方排程的任一批次" in n for n in tables.notes), label
+
+
+def test_composition_spells_out_the_interchangeable_slot(config):
+    tables = _progress(config, {"run01.xls": ["04", "25", "01"]},
+                       {"run01.xls": "Predose"})
+    row = tables.composition[tables.composition["批次(Batch)"] == "04+25+01"].iloc[0]
+    slot = next(v for v in row.values if isinstance(v, str) and "Testis" in v)
+    assert "卵巢" in slot, f"批次組成應標明此位置也可能是卵巢：{slot!r}"
+
+
+def test_an_unrelated_code_still_fails_to_match(config):
+    """互換只開放給有宣告的代碼，不是放寬成什麼都能對。"""
+    tables = _progress(config, {"run01.xls": ["04", "27", "01"]},
+                       {"run01.xls": "Predose"})
+    assert tables.progress.iloc[0]["批次(Batch)"] == "(無法對應)"

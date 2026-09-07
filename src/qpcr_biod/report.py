@@ -26,8 +26,9 @@ ROW_FILLS = {
     STYLE_NOT_FINAL: PatternFill("solid", fgColor="F2F2F2"),      # 淺灰：非最終採用
 }
 
-HEADER_FILL = PatternFill("solid", fgColor="DDEBF7")
-HEADER_FONT = Font(bold=True)
+# 表頭樣式沿用既有統整表：深藍底、白色粗體
+HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
+HEADER_FONT = Font(bold=True, color="FFFFFF", size=10)
 
 SHEET_NOTES = "說明"
 SHEET_MAIN = "統整數據"
@@ -44,6 +45,24 @@ SHEET_MANIFEST = "執行紀錄"
 
 # 這些欄位是內部用的，不輸出到報表
 INTERNAL_COLUMNS = ["列標記"]
+
+# 這些分頁是「一列表頭 + 多列資料」，適合加篩選箭頭。
+# 其餘分頁（說明、執行紀錄、血液LOB校正、批次進度表）是多個區塊疊起來的，
+# 只有一列表頭的假設不成立，加了篩選反而會把區塊標題也算進去。
+FILTERABLE_SHEETS = {
+    SHEET_MAIN,
+    SHEET_ORGAN_SUMMARY,
+    SHEET_CURVES,
+    "QC點位明細",
+    SHEET_ORGAN_CODES,
+    SHEET_ANIMALS,
+    SHEET_DOTPLOT,
+    SHEET_FILES,
+    SHEET_RAW,
+    "執行紀錄-輸入檔",
+    "執行紀錄-人工決策",
+    "執行紀錄-警告",
+}
 
 
 def write_report(path: str | Path, *, config: StudyConfig,
@@ -234,8 +253,15 @@ def _apply_formatting(path: Path, consolidated: pd.DataFrame) -> None:
                 if cell.value is not None:
                     cell.fill = HEADER_FILL
                     cell.font = HEADER_FONT
-                    cell.alignment = Alignment(vertical="center", wrap_text=True)
+                    cell.alignment = Alignment(
+                        horizontal="center", vertical="center", wrap_text=True
+                    )
             sheet.freeze_panes = "A2"
+            # 篩選箭頭讓同仁能自己挑臟器/時間點看，不必捲動整張表
+            if sheet.title in FILTERABLE_SHEETS and sheet.max_row > 1:
+                sheet.auto_filter.ref = (
+                    f"A1:{get_column_letter(sheet.max_column)}{sheet.max_row}"
+                )
         _autosize(sheet)
 
     if SHEET_MAIN in workbook.sheetnames and "列標記" in consolidated.columns:

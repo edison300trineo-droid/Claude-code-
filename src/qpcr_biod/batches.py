@@ -54,14 +54,23 @@ def build_batch_tables(wells: pd.DataFrame, consolidated: pd.DataFrame,
         return tables
 
     schedule = official_schedule or (config.raw.get("run_schedule") or {}).get("official") or []
-    tables.composition = _composition(batches, config, reference)
+    alternatives = _alternatives(config)
+    tables.composition = _composition(batches, config, reference, alternatives)
     tables.progress = _progress(wells, consolidated, run_order, batches, schedule,
-                                config, tables.notes)
+                                config, alternatives, tables.notes)
     return tables
 
 
+def _alternatives(config: StudyConfig) -> dict[str, list[str]]:
+    """{主要代碼: [可互換的代碼, ...]}，例如睪丸(25)與卵巢(11)共用同一個位置。"""
+    raw = config.raw.get("organ_code_alternatives") or {}
+    return {str(k): [str(v) for v in values] for k, values in raw.items()}
+
+
 def _composition(batches: dict[str, list[str]], config: StudyConfig,
-                 reference=None) -> pd.DataFrame:
+                 reference=None, alternatives: dict[str, list[str]] | None = None
+                 ) -> pd.DataFrame:
+    alternatives = alternatives or {}
     official_organs = dict(getattr(reference, "organ_codes", {}) or {})
     rows: list[dict[str, Any]] = []
     for name, codes in batches.items():
@@ -71,10 +80,17 @@ def _composition(batches: dict[str, list[str]], config: StudyConfig,
             names = official_organs.get(code)
             english = names.get("en") if names else config.organ_name(code, "en")
             chinese = names.get("zh") if names else config.organ_name(code, "zh")
-            row[f"臟器代碼{index}"] = code
-            row[f"臟器名稱{index}"] = (
-                f"{chinese} / {english}" if chinese or english else "(尚未收錄)"
-            )
+            label = f"{chinese} / {english}" if chinese or english else "(尚未收錄)"
+            swaps = alternatives.get(code, [])
+            if swaps:
+                spelled = "、".join(
+                    f"{alt} {config.organ_name(alt, 'zh') or alt}" for alt in swaps
+                )
+                row[f"臟器代碼{index}"] = f"{code}（或 {'、'.join(swaps)}）"
+                label += f"；此位置亦可為 {spelled}"
+            else:
+                row[f"臟器代碼{index}"] = code
+            row[f"臟器名稱{index}"] = label
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -82,7 +98,7 @@ def _composition(batches: dict[str, list[str]], config: StudyConfig,
 def _progress(wells: pd.DataFrame, consolidated: pd.DataFrame,
               run_order: dict[str, int], batches: dict[str, list[str]],
               schedule: list[dict[str, Any]], config: StudyConfig,
-              notes: list[str]) -> pd.DataFrame:
+              alternatives: dict[str, list[str]], notes: list[str]) -> pd.DataFrame:
     official_index = {
         (str(entry.get("batch")), config.normalize_timepoint(entry.get("timepoint"))):
             entry.get("run")
@@ -99,7 +115,7 @@ def _progress(wells: pd.DataFrame, consolidated: pd.DataFrame,
                 animals["source_file"] == source_file, "organ_code"
             ].dropna()
         })
-        batch, match_quality = _match_batch(codes, batches)
+        batch, match_quality = _match_batch(codes, batches, alternatives)
         file_timepoints = sorted(timepoints.get(source_file, set()))
         timepoint = file_timepoints[0] if len(file_timepoints) == 1 else ""
 
@@ -149,22 +165,41 @@ def _timepoints_by_file(consolidated: pd.DataFrame) -> dict[str, set[str]]:
     return result
 
 
-def _match_batch(codes: list[str], batches: dict[str, list[str]]) -> tuple[str | None, str]:
+def _match_batch(codes: list[str], batches: dict[str, list[str]],
+                 alternatives: dict[str, list[str]]) -> tuple[str | None, str]:
     """把一個檔案出現的臟器代碼對應到批次。
 
-    完全相符最理想；只出現部分臟器（例如某些動物該臟器沒送測）仍算相符，
-    但會標示為部分，讓人知道這個判定沒有那麼硬。
+    以「上機位置」為單位判定，不是以代碼。一個位置可能接受多個代碼
+    （例如性腺位置：公鼠睪丸 25 / 母鼠卵巢 11），只要其中一個出現就算這個
+    位置有做到 —— 說成「未出現 11」會讓人以為漏做了一個臟器，其實沒有。
     """
     if not codes:
         return None, "(無動物檢體)"
     observed = set(codes)
+
+    def slots(batch_codes: list[str]) -> list[tuple[str, set[str]]]:
+        """回傳 [(批次寫的主要代碼, 這個位置接受的所有代碼), ...]。"""
+        return [
+            (str(code), {str(code), *alternatives.get(str(code), [])})
+            for code in batch_codes
+        ]
+
+    best: tuple[str, list[tuple[str, set[str]]]] | None = None
     for name, batch_codes in batches.items():
-        expected = {str(c) for c in batch_codes}
-        if observed == expected:
+        batch_slots = slots(batch_codes)
+        accepted = set().union(*(codes for _, codes in batch_slots)) if batch_slots else set()
+        if not observed.issubset(accepted):
+            continue  # 有這個批次容不下的臟器
+        unfilled = [slot for slot in batch_slots if not (slot[1] & observed)]
+        if not unfilled:
             return name, "完全相符"
-    for name, batch_codes in batches.items():
-        expected = {str(c) for c in batch_codes}
-        if observed and observed.issubset(expected):
-            missing = sorted(expected - observed)
-            return name, f"部分相符（本檔未出現：{'、'.join(missing)}）"
-    return None, "無法對應"
+        if best is None or len(unfilled) < len(best[1]):
+            best = (name, unfilled)
+
+    if best is None:
+        return None, "無法對應"
+
+    name, unfilled = best
+    # 回報批次自己寫的主要代碼，而不是替代代碼 —— 對照批次組成表才看得懂
+    missing = "、".join(primary for primary, _ in unfilled)
+    return name, f"部分相符（本檔未出現：{missing}）"

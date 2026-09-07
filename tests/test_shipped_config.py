@@ -82,17 +82,27 @@ def test_every_batched_code_exists_in_the_organ_table():
     assert not unknown, f"批次引用了未收錄的臟器代碼：{sorted(unknown)}"
 
 
-def test_ovaries_are_knowingly_unbatched():
-    """卵巢(11)在官方對照表中未分配批次 —— 這是既有事實，不是設定漏填。
+def test_ovaries_share_the_testis_slot_rather_than_having_their_own_batch():
+    """卵巢(11)不自成批次，而是與睪丸(25)共用同一個上機位置。
 
-    睪丸(25)在批次 04+25+01 內，卵巢沒有對應的批次。若日後卵巢檢體送測，
-    pipeline 會報「無法對應到批次」而不是硬湊，屆時需補上批次定義。
-    這條測試把現況釘住，設定被改動時會提醒重新確認。
+    官方對照表只寫得下一個代碼，所以互換關係設在 organ_code_alternatives，
+    這樣不論批次組成來自官方表還是設定檔都會生效。
     """
     config = load_config(CONFIG)
     assigned = {code for codes in config.raw["batches"].values() for code in codes}
-    unbatched = set(config.organ_codes) - assigned
-    assert unbatched == {"11"}, (
-        f"未分批的臟器代碼有變動：{sorted(unbatched)}。"
-        "若是刻意調整批次組成，請一併更新這條測試。"
+    assert "11" not in assigned, "卵巢不該自成一個批次位置"
+
+    alternatives = config.raw.get("organ_code_alternatives") or {}
+    assert alternatives.get("25") == ["11"], (
+        "睪丸(25)與卵巢(11)的互換關係未設定，"
+        "卵巢檢體會被判為不屬於任何批次。"
     )
+
+
+def test_every_alternative_code_exists_in_the_organ_table():
+    config = load_config(CONFIG)
+    alternatives = config.raw.get("organ_code_alternatives") or {}
+    for primary, swaps in alternatives.items():
+        assert primary in config.organ_codes, f"互換設定的主要代碼 {primary} 未收錄"
+        for code in swaps:
+            assert code in config.organ_codes, f"互換設定的代碼 {code} 未收錄"
