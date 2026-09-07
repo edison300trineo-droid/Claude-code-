@@ -8,4 +8,4 @@
    decisions.xlsx，帶覆核者與日期，pipeline 每次重跑都會套用。
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

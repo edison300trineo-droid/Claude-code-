@@ -6,6 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from . import __version__
 from .compare import (
     DEFAULT_SHEET,
     compare_tables,
@@ -28,6 +29,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="qpcr-biod",
         description="Alu qPCR 生物分布數據統整 pipeline",
+    )
+    # 更新程式後最常見的疑問是「我到底更到了沒」。版本號印在這裡也印在每次
+    # 執行的結果裡，看一眼就知道，不必翻檔案日期。
+    parser.add_argument(
+        "--version", action="version", version=f"qpcr-biod {__version__}",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -100,6 +106,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"執行失敗：{exc}", file=sys.stderr)
         return 1
 
+    print(f"程式版本：qpcr-biod {__version__}")
     print(f"研究編號：{config.study_id}")
     print(f"讀入 run 數：{result.run_count}")
     print(f"最終採用檢體數：{result.sample_count}")
