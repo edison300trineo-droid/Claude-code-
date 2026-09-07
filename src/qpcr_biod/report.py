@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +52,6 @@ INTERNAL_COLUMNS = ["列標記"]
 # 只有一列表頭的假設不成立，加了篩選反而會把區塊標題也算進去。
 FILTERABLE_SHEETS = {
     SHEET_MAIN,
-    SHEET_ORGAN_SUMMARY,
     SHEET_CURVES,
     "QC點位明細",
     SHEET_ORGAN_CODES,
@@ -82,7 +82,9 @@ def write_report(path: str | Path, *, config: StudyConfig,
         _write(writer, SHEET_NOTES, _notes_frame(config, manifest, summaries, lob),
                header=False)
         _write(writer, SHEET_MAIN, display)
-        _write(writer, SHEET_ORGAN_SUMMARY, summaries.organ_summary)
+        summary_rows, summary_kinds = _summary_rows(summaries, lob, config)
+        _write(writer, SHEET_ORGAN_SUMMARY,
+               pd.DataFrame(summary_rows), header=False)
 
         for name, frame in summaries.subsets.items():
             _write(writer, _safe_sheet_name(name), frame)
@@ -105,7 +107,7 @@ def write_report(path: str | Path, *, config: StudyConfig,
         _write(writer, "執行紀錄-警告", manifest.warnings_frame())
         _write(writer, SHEET_RAW, raw)
 
-    _apply_formatting(target, consolidated)
+    _apply_formatting(target, consolidated, summary_kinds)
     return target
 
 
@@ -216,6 +218,166 @@ def _lob_frame(lob: LOBResult, summaries: SummaryTables) -> pd.DataFrame:
     return pd.concat(blocks, ignore_index=True)
 
 
+# --- Organ Mean SD Summary 的區塊式版面 -------------------------------------
+# 每個臟器一個區塊：合併的臟器標題 + 重複的欄位表頭 + 該臟器的資料列。
+# 這是報告直接引用的表，分區塊比一張平表好讀 —— 看某個臟器時不必在
+# 幾十列裡用眼睛過濾。
+
+SUMMARY_TITLE = (
+    "Per-Organ Alu qPCR Quantification — Mean ± SD Summary (by Sex and Time Point)"
+)
+SUMMARY_COLUMNS = 7
+SUMMARY_HEADER = [
+    "Sex", "Time Point", "Total N (incl. ND)",
+    "Quantifiable N (used for Mean/SD)",
+    "Mean ({unit})", "SD ({unit})", "Remarks",
+]
+LOB_HEADER = [
+    "Sex", "Time Point", "Total N (incl. ND)",
+    "Quantifiable N (LOB-adjusted: not ND AND \u2265 LOB)",
+    "Mean, LOB-adjusted ({unit})", "SD, LOB-adjusted ({unit})", "Remarks",
+]
+
+# 版面標記，供 _apply_formatting 套用樣式
+KIND_TITLE = "title"
+KIND_NOTE = "note"
+KIND_SECTION = "section"
+KIND_HEADER = "header"
+KIND_DATA = "data"
+KIND_LOB_LABEL = "lob_label"
+KIND_BLANK = "blank"
+
+# 參考版面在沒有數值的儲存格填 "-"，而不是留白 —— 留白看起來像「還沒填」，
+# 填 "-" 才明確表示「這格本來就沒有值」。
+DASH = "-"
+
+
+def _summary_note(config: StudyConfig) -> str:
+    return (
+        "Calculation rule: only FINAL rows with a reportable result that is NOT ND "
+        "(i.e. \u2265 that run's LLOQ) are included in Mean/SD. Samples below LLOQ (ND) "
+        "are excluded from the Mean/SD calculation, not substituted; the number "
+        "excluded is noted in the Remarks column so total N and quantifiable N can be "
+        f"compared at a glance. Unit: {config.unit}. Only organ / time point "
+        "combinations with data currently imported are shown; combinations not yet "
+        "run do not appear below."
+    )
+
+
+def _blank(width: int = SUMMARY_COLUMNS) -> list:
+    return [None] * width
+
+
+def _pad(cells: list, width: int = SUMMARY_COLUMNS) -> list:
+    return list(cells) + [None] * (width - len(cells))
+
+
+def _dash(value):
+    """數值欄沒有值時填 "-"；有值就原樣保留（不做四捨五入）。"""
+    if value is None:
+        return DASH
+    if isinstance(value, float) and math.isnan(value):
+        return DASH
+    if isinstance(value, str) and not value.strip():
+        return DASH
+    return value
+
+
+def _summary_rows(summaries: SummaryTables, lob: LOBResult,
+                  config: StudyConfig) -> tuple[list[list], list[str]]:
+    """回傳 (逐列內容, 每列的版面標記)。"""
+    unit = config.unit
+    rows: list[list] = []
+    kinds: list[str] = []
+
+    def add(cells: list, kind: str) -> None:
+        rows.append(_pad(cells))
+        kinds.append(kind)
+
+    add([SUMMARY_TITLE], KIND_TITLE)
+    add([_summary_note(config)], KIND_NOTE)
+    add(_blank(), KIND_BLANK)
+
+    table = summaries.organ_summary
+    if table is None or table.empty:
+        add(["（本次無可彙整的資料）"], KIND_NOTE)
+        return rows, kinds
+
+    header = [c.format(unit=unit) for c in SUMMARY_HEADER]
+
+    for code, group in table.groupby("Organ code", sort=True):
+        organ = str(group.iloc[0]["Organ"] or "")
+        add([f"Organ: {organ} (code {code})"], KIND_SECTION)
+        add(header, KIND_HEADER)
+        for _, row in group.iterrows():
+            add([
+                row["Sex"], row["Time point"], row["N (total)"],
+                row["N (quantifiable)"],
+                _dash(row.get(f"Mean ({unit})")), _dash(row.get(f"SD ({unit})")),
+                row["Remarks"],
+            ], KIND_DATA)
+        add(_blank(), KIND_BLANK)
+
+        if str(code) == lob.organ_code and lob.usable:
+            rows_lob, kinds_lob = _blood_lob_rows(summaries, lob, config, organ)
+            rows.extend(rows_lob)
+            kinds.extend(kinds_lob)
+
+    return rows, kinds
+
+
+def _blood_lob_rows(summaries: SummaryTables, lob: LOBResult, config: StudyConfig,
+                    organ: str) -> tuple[list[list], list[str]]:
+    """血液的 LOB 校正區塊：計算依據 + 校正後的 Mean/SD 表。"""
+    unit = config.unit
+    rows: list[list] = []
+    kinds: list[str] = []
+
+    def add(cells: list, kind: str) -> None:
+        rows.append(_pad(cells))
+        kinds.append(kind)
+
+    add([f"Organ: {organ} (code {lob.organ_code}) \u2014 LOB-Adjusted Calculation"],
+        KIND_SECTION)
+    add([
+        f"Note: the LOB is derived from {lob.baseline_timepoint} blood specimens "
+        f"themselves (n={lob.n_wells} individual replicate wells), because the "
+        "in-house matrix QC and the sponsor-sampled specimens have different "
+        "sources and pre-processing pathways and their interference levels are not "
+        "directly comparable. For every OTHER timepoint below, a result counts as "
+        "quantifiable/positive only if it is both NOT ND and \u2265 this LOB. "
+        f"Because the {lob.baseline_timepoint} group itself defines the LOB, it is "
+        "not evaluated against its own threshold \u2014 its values are left as "
+        '"-" by design. The table above is unchanged and still reflects the '
+        "standard LLOQ-only rule."
+    ], KIND_NOTE)
+
+    for label, value in (
+        (f"n ({lob.baseline_timepoint} replicate wells, 2 \u00d7 animals)", lob.n_wells),
+        ("Mean (pg)", lob.mean),
+        ("SD (pg)", lob.sd),
+        (f"LOB = Mean + {lob.primary_multiplier}\u00d7SD (pg) \u2014 used below",
+         lob.lob_primary),
+    ):
+        add([label, None, None, None, value], KIND_LOB_LABEL)
+    add(_blank(), KIND_BLANK)
+
+    add([c.format(unit=unit) for c in LOB_HEADER], KIND_HEADER)
+    adjusted = summaries.blood_lob_adjusted
+    if adjusted is None or adjusted.empty:
+        add(["（無血液資料）"], KIND_DATA)
+    else:
+        for _, row in adjusted.iterrows():
+            add([
+                row["Sex"], row["Time point"], row["N (total)"],
+                row["Positive (\u2265LOB & non-ND)"],
+                _dash(row.get(f"Mean ({unit})")), _dash(row.get(f"SD ({unit})")),
+                row["Remarks"],
+            ], KIND_DATA)
+    add(_blank(), KIND_BLANK)
+    return rows, kinds
+
+
 def _batches_frame(batches: BatchTables) -> pd.DataFrame:
     """批次組成與 Run 進度疊成同一分頁。"""
     blocks = [
@@ -240,7 +402,8 @@ def _frame_with_header(frame: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _apply_formatting(path: Path, consolidated: pd.DataFrame) -> None:
+def _apply_formatting(path: Path, consolidated: pd.DataFrame,
+                      summary_kinds: list[str] | None = None) -> None:
     from openpyxl import load_workbook
 
     workbook = load_workbook(path)
@@ -248,7 +411,9 @@ def _apply_formatting(path: Path, consolidated: pd.DataFrame) -> None:
     for sheet in workbook.worksheets:
         if sheet.max_row < 1:
             continue
-        if sheet.title not in {SHEET_NOTES, SHEET_MANIFEST}:
+        if sheet.title in {SHEET_NOTES, SHEET_MANIFEST, SHEET_ORGAN_SUMMARY}:
+            pass
+        else:
             for cell in sheet[1]:
                 if cell.value is not None:
                     cell.fill = HEADER_FILL
@@ -276,6 +441,9 @@ def _apply_formatting(path: Path, consolidated: pd.DataFrame) -> None:
 
     _force_text_identifiers(workbook)
 
+    if summary_kinds and SHEET_ORGAN_SUMMARY in workbook.sheetnames:
+        _style_summary_sheet(workbook[SHEET_ORGAN_SUMMARY], summary_kinds)
+
     if SHEET_NOTES in workbook.sheetnames:
         notes = workbook[SHEET_NOTES]
         notes.column_dimensions["A"].width = 100
@@ -299,6 +467,48 @@ def _force_text_identifiers(workbook) -> None:
             if cell.value in IDENTIFIER_HEADERS:
                 for row in range(2, sheet.max_row + 1):
                     sheet.cell(row=row, column=cell.column).number_format = "@"
+
+
+SUMMARY_WIDTHS = {"A": 12, "B": 16, "C": 18, "D": 26, "E": 13, "F": 13, "G": 50}
+
+
+def _style_summary_sheet(sheet, kinds: list[str]) -> None:
+    """依版面標記逐列套用樣式。
+
+    標題與說明橫跨整列（合併），臟器區塊標題粗體，欄位表頭沿用深藍底白字。
+    """
+    for index, kind in enumerate(kinds, start=1):
+        cell = sheet.cell(row=index, column=1)
+        if kind == KIND_TITLE:
+            cell.font = Font(bold=True, size=14)
+            sheet.merge_cells(start_row=index, start_column=1,
+                              end_row=index, end_column=SUMMARY_COLUMNS)
+        elif kind == KIND_NOTE:
+            cell.font = Font(size=9, color="666666")
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+            sheet.merge_cells(start_row=index, start_column=1,
+                              end_row=index, end_column=SUMMARY_COLUMNS)
+        elif kind == KIND_SECTION:
+            cell.font = Font(bold=True, size=11)
+            sheet.merge_cells(start_row=index, start_column=1,
+                              end_row=index, end_column=SUMMARY_COLUMNS)
+        elif kind == KIND_LOB_LABEL:
+            # 標籤跨 A:D，數值落在 E —— 與參考版面一致。
+            cell.font = Font(bold=True, size=10)
+            sheet.merge_cells(start_row=index, start_column=1,
+                              end_row=index, end_column=4)
+        elif kind == KIND_HEADER:
+            for column in range(1, SUMMARY_COLUMNS + 1):
+                header_cell = sheet.cell(row=index, column=column)
+                header_cell.fill = HEADER_FILL
+                header_cell.font = HEADER_FONT
+                header_cell.alignment = Alignment(
+                    horizontal="center", vertical="center", wrap_text=True
+                )
+
+    for column, width in SUMMARY_WIDTHS.items():
+        sheet.column_dimensions[column].width = width
+    sheet.freeze_panes = "A4"
 
 
 def _autosize(sheet, limit: int = 46) -> None:
