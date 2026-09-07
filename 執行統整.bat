@@ -7,8 +7,10 @@ rem 雙擊即可。跑完會停在畫面上讓你看結果與警告。
 
 cd /d "%~dp0"
 
-where python >nul 2>nul
-if errorlevel 1 (
+set "PY="
+where python >nul 2>nul && set "PY=python"
+if not defined PY where py >nul 2>nul && set "PY=py"
+if not defined PY (
     echo [錯誤] 找不到 Python。請先安裝 Python 3.10 以上版本，
     echo        安裝時記得勾選 "Add Python to PATH"。
     echo.
@@ -27,7 +29,7 @@ if not exist "config\BD-TS-20260701.yaml" (
 echo 正在統整 qPCR 資料，請稍候...
 echo.
 
-python -m qpcr_biod.cli run -c "config\BD-TS-20260701.yaml"
+%PY% -m qpcr_biod.cli run -c "config\BD-TS-20260701.yaml"
 set EXITCODE=%errorlevel%
 
 echo.

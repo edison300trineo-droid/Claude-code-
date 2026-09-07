@@ -7,6 +7,16 @@ rem 導入期用來確認新流程能重現你已經確認過的結果。
 
 cd /d "%~dp0"
 
+set "PY="
+where python >nul 2>nul && set "PY=python"
+if not defined PY where py >nul 2>nul && set "PY=py"
+if not defined PY (
+    echo [錯誤] 找不到 Python，請先執行「安裝.bat」。
+    echo.
+    pause
+    exit /b 1
+)
+
 echo ============================================================
 echo   對照驗收 - pipeline 產出 vs. 既有統整表
 echo ============================================================
@@ -31,7 +41,7 @@ echo.
 echo 正在對帳，請稍候...
 echo.
 
-python -m qpcr_biod.cli compare -c "config\BD-TS-20260701.yaml" --against "%OLDFILE%"
+%PY% -m qpcr_biod.cli compare -c "config\BD-TS-20260701.yaml" --against "%OLDFILE%"
 set EXITCODE=%errorlevel%
 
 echo.

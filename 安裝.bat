@@ -14,25 +14,27 @@ echo.
 
 rem --- 1. 檢查 Python -----------------------------------------
 echo [1/5] 檢查 Python...
-where python >nul 2>nul
-if errorlevel 1 (
+set "PY="
+where python >nul 2>nul && set "PY=python"
+if not defined PY where py >nul 2>nul && set "PY=py"
+if not defined PY (
     echo.
     echo   [錯誤] 找不到 Python。
     echo.
-    echo   請先到 https://www.python.org/downloads/ 下載安裝 Python 3.10 以上版本。
+    echo   請到 https://www.python.org/downloads/ 下載安裝 Python 3.10 以上版本。
     echo   安裝時務必勾選 "Add Python to PATH"，裝完後重新執行本檔案。
     echo.
     pause
     exit /b 1
 )
-for /f "tokens=2" %%v in ('python -V 2^>^&1') do set PYVER=%%v
-echo       找到 Python !PYVER!
+for /f "tokens=2" %%v in ('%PY% -V 2^>^&1') do set PYVER=%%v
+echo       找到 Python !PYVER!（指令：%PY%）
 echo.
 
 rem --- 2. 安裝套件 --------------------------------------------
 echo [2/5] 安裝程式與相依套件（第一次會花幾分鐘）...
-python -m pip install --upgrade pip --quiet
-python -m pip install -e . --quiet
+%PY% -m pip install --upgrade pip --quiet
+%PY% -m pip install -e ".[dev]" --quiet
 if errorlevel 1 (
     echo.
     echo   [錯誤] 套件安裝失敗。
@@ -54,12 +56,12 @@ echo.
 
 rem --- 4. 產生決策表 ------------------------------------------
 echo [4/5] 準備人工決策表...
-python -m qpcr_biod.cli init-decisions -c "config\BD-TS-20260701.yaml"
+%PY% -m qpcr_biod.cli init-decisions -c "config\BD-TS-20260701.yaml"
 echo.
 
 rem --- 5. 自我測試 --------------------------------------------
 echo [5/5] 執行自我測試，確認安裝正確...
-python -m pytest -q
+%PY% -m pytest -q
 if errorlevel 1 (
     echo.
     echo   [警告] 自我測試沒有全部通過。

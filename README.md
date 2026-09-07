@@ -46,7 +46,7 @@ qpcr-biod/
 ## 安裝
 
 ```bash
-pip install -e .
+pip install -e ".[dev]"
 ```
 
 需要 Python 3.10 以上。
