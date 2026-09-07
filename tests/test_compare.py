@@ -125,3 +125,54 @@ def test_subset_run_reports_matching_values_separately_from_coverage(study_dir, 
     assert not result.is_clean
     assert len(result.only_in_old) > 0
     assert len(result.only_in_new) == 0
+
+
+# --- 混合型欄位（數值 或 ND 標記）------------------------------------------
+
+def test_float_precision_in_the_result_column_is_not_a_difference(study_dir, config):
+    """0.154890835285187 與 0.15489083528518677 是同一個數字，不是差異。
+
+    既有活頁簿存的是 Excel 的 15 位表示，pipeline 由原始 float64 產生完整位數。
+    純字串比對會把整批可定量結果都報成不一致。
+    """
+    table = run_pipeline(config).consolidated
+    column = "呈現結果(低於LLOQ標示ND)"
+
+    rounded = table.copy()
+    numeric_rows = rounded.index[rounded[column].map(lambda v: isinstance(v, float))]
+    assert len(numeric_rows) > 0, "需要至少一列可定量結果才測得到"
+    for index in numeric_rows:
+        rounded.loc[index, column] = float(f"{rounded.loc[index, column]:.15g}")
+
+    result = compare_tables(table, rounded)
+    assert result.values_match, (
+        "浮點位數差異不該被判為不一致：\n"
+        f"{result.differences.head().to_string() if not result.differences.empty else ''}"
+    )
+
+
+def test_a_real_change_in_the_result_column_is_still_detected(study_dir, config):
+    table = run_pipeline(config).consolidated
+    column = "呈現結果(低於LLOQ標示ND)"
+
+    modified = table.copy()
+    target = modified.index[modified[column].map(lambda v: isinstance(v, float))][0]
+    modified.loc[target, column] = float(modified.loc[target, column]) * 1.05
+
+    result = compare_tables(table, modified)
+    assert result.differing_rows == 1
+    assert result.differences.iloc[0]["欄位"] == column
+
+
+def test_number_versus_nd_is_reported_as_a_label_mismatch(study_dir, config):
+    """數值變成 ND（或反過來）是真正要抓的差異，訊息也要講得清楚。"""
+    table = run_pipeline(config).consolidated
+    column = "呈現結果(低於LLOQ標示ND)"
+
+    modified = table.copy()
+    target = modified.index[modified[column].map(lambda v: isinstance(v, float))][0]
+    modified.loc[target, column] = "ND"
+
+    result = compare_tables(table, modified)
+    assert result.differing_rows == 1
+    assert "標記不一致" in result.differences.iloc[0]["差異"]

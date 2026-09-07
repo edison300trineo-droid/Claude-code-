@@ -29,11 +29,16 @@ NUMERIC_COLUMNS = [
     "孔位2-Ct",
     "孔位2-Quantity",
 ]
+# 混合型欄位：可能是數字，也可能是 ND 這類標記。
+# 純字串比對會把 0.154890835285187 和 0.15489083528518677 判成不一致 ——
+# 那是同一個數字的兩種字串長度，不是差異。
+MIXED_COLUMNS = [
+    "呈現結果(低於LLOQ標示ND)",
+]
 TEXT_COLUMNS = [
     "版本",
     "最終採用",
     "HIGHSD",
-    "呈現結果(低於LLOQ標示ND)",
     "性別(Sex)",
     "組別(Group)",
     "採樣時間點(Time point)",
@@ -190,9 +195,10 @@ def compare_tables(old: pd.DataFrame, new: pd.DataFrame, *,
 
     numeric = [c for c in NUMERIC_COLUMNS if c in old.columns and c in new.columns]
     text = [c for c in TEXT_COLUMNS if c in old.columns and c in new.columns]
+    mixed = [c for c in MIXED_COLUMNS if c in old.columns and c in new.columns]
     result.skipped_columns = [
-        c for c in NUMERIC_COLUMNS + TEXT_COLUMNS
-        if c not in numeric and c not in text
+        c for c in NUMERIC_COLUMNS + TEXT_COLUMNS + MIXED_COLUMNS
+        if c not in numeric and c not in text and c not in mixed
     ]
 
     old_indexed = old_prepared.set_index("對照鍵")
@@ -228,6 +234,29 @@ def compare_tables(old: pd.DataFrame, new: pd.DataFrame, *,
                 "既有統整表": old_row.get(column),
                 "pipeline產出": new_row.get(column),
                 "差異": _describe_delta(old_value, new_value),
+            })
+
+        for column in mixed:
+            raw_old, raw_new = old_row.get(column), new_row.get(column)
+            old_number, new_number = _as_number(raw_old), _as_number(raw_new)
+            if old_number is not None and new_number is not None:
+                # 兩邊都是數字 -> 用容差比，避免字串位數差異造成誤報
+                if _numbers_match(old_number, new_number, tolerance):
+                    continue
+                rows.append({
+                    "對照鍵": key, "欄位": column,
+                    "既有統整表": raw_old, "pipeline產出": raw_new,
+                    "差異": _describe_delta(old_number, new_number),
+                })
+                continue
+            old_text, new_text = _norm_text(raw_old), _norm_text(raw_new)
+            if old_text == new_text:
+                continue
+            rows.append({
+                "對照鍵": key, "欄位": column,
+                "既有統整表": old_text or "(空白)", "pipeline產出": new_text or "(空白)",
+                "差異": "標記不一致（一邊是數值、一邊是 ND 之類的標記）"
+                        if (old_number is None) != (new_number is None) else "文字不一致",
             })
 
         for column in text:
