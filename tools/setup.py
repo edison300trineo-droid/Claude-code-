@@ -64,7 +64,8 @@ def check_python() -> int:
 def install_package() -> int:
     step(2, "安裝程式與相依套件（第一次會花幾分鐘）...")
     run("-m", "pip", "install", "--upgrade", "pip", "--quiet")
-    if run("-m", "pip", "install", "-e", ".[dev]", "--quiet") != 0:
+    if run("-m", "pip", "install", "-e", ".[dev]", "--quiet",
+           "--no-warn-script-location") != 0:
         return fail(
             "套件安裝失敗。",
             "如果是公司網路擋住 PyPI，請聯繫 IT 或改用離線安裝。",

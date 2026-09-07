@@ -62,6 +62,15 @@ qpcr-biod init-decisions -c config/BD-TS-20260701.yaml
 qpcr-biod run -c config/BD-TS-20260701.yaml
 ```
 
+> `qpcr-biod` 指令要能用，Python 的 `Scripts` 目錄必須在 PATH 上。
+> 不在也沒關係，改用等價的模組呼叫即可，兩者完全相同：
+>
+> ```bash
+> python -m qpcr_biod.cli run -c config/BD-TS-20260701.yaml
+> ```
+>
+> 專案附的 `.bat` 一律使用後者，所以不受 PATH 影響。
+
 Windows 上可直接雙擊 `執行統整.bat`。
 
 > 三個 `.bat` 刻意保持**純 ASCII**。cmd.exe 在 `chcp` 之後會用切換前的編碼
