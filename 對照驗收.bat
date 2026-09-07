@@ -6,7 +6,8 @@ rem qPCR biodistribution consolidation - reconcile against an existing workbook.
 rem Pure ASCII on purpose; see the note in setup.bat. The prompt and all
 rem Chinese output come from tools\reconcile.py.
 
-cd /d "%~dp0"
+rem pushd (not cd /d) so the folder can live on a UNC share.
+pushd "%~dp0" || (echo   [ERROR] Cannot reach "%~dp0" & pause & exit /b 1)
 set PYTHONIOENCODING=utf-8
 
 set "PY="
@@ -17,6 +18,7 @@ if not defined PY (
     echo   [ERROR] Python not found. Run the setup batch file first.
     echo.
     pause
+    popd
     exit /b 1
 )
 
@@ -25,4 +27,5 @@ set EXITCODE=%errorlevel%
 
 echo.
 pause
+popd
 exit /b %EXITCODE%

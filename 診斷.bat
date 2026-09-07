@@ -6,7 +6,8 @@ rem qPCR biodistribution consolidation - application control policy diagnostic.
 rem Pure ASCII on purpose; all Chinese output comes from the PowerShell script.
 rem Read-only: this changes no system setting.
 
-cd /d "%~dp0"
+rem pushd (not cd /d) so the folder can live on a UNC share.
+pushd "%~dp0" || (echo   [ERROR] Cannot reach "%~dp0" & pause & exit /b 1)
 
 if not exist "tools\diagnose.ps1" (
     echo.
@@ -14,6 +15,7 @@ if not exist "tools\diagnose.ps1" (
     echo   Extract the whole project folder and run this file from inside it.
     echo.
     pause
+    popd
     exit /b 1
 )
 
@@ -23,3 +25,4 @@ echo.
 echo   Copy the whole output above and send it back for analysis.
 echo.
 pause
+popd

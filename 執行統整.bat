@@ -6,7 +6,8 @@ rem qPCR biodistribution consolidation - produce the summary workbook.
 rem Pure ASCII on purpose; see the note in setup.bat. Chinese output comes
 rem from the Python CLI.
 
-cd /d "%~dp0"
+rem pushd (not cd /d) so the folder can live on a UNC share.
+pushd "%~dp0" || (echo   [ERROR] Cannot reach "%~dp0" & pause & exit /b 1)
 set PYTHONIOENCODING=utf-8
 
 set "PY="
@@ -17,6 +18,7 @@ if not defined PY (
     echo   [ERROR] Python not found. Run the setup batch file first.
     echo.
     pause
+    popd
     exit /b 1
 )
 
@@ -26,6 +28,7 @@ if not exist "config\BD-TS-20260701.yaml" (
     echo   This file must sit next to the config folder.
     echo.
     pause
+    popd
     exit /b 1
 )
 
@@ -40,4 +43,5 @@ if %EXITCODE% neq 0 (
 )
 echo.
 pause
+popd
 exit /b %EXITCODE%

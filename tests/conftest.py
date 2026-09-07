@@ -35,8 +35,29 @@ def study_dir(tmp_path: Path) -> Path:
     pd.DataFrame(REFERENCE_ROWS, columns=["Animal No", "Sex", "Time point"]).to_excel(
         tmp_path / "data/reference/animals.xlsx", index=False
     )
-    shutil.copy(ROOT / "config/BD-TS-20260701.yaml", tmp_path / "config/study.yaml")
+    _write_test_config(tmp_path / "config/study.yaml")
     return tmp_path
+
+
+def _write_test_config(target: Path) -> None:
+    """複製正式設定，但把 paths 指回這次測試的暫存資料夾。
+
+    正式設定的 paths 指向部署用的 NAS 位置。測試要驗的是規則，不是部署位置 ——
+    直接沿用會讓「改了部署路徑」變成「測試壞掉」，那是假訊號。
+    """
+    import yaml
+
+    raw = yaml.safe_load((ROOT / "config/BD-TS-20260701.yaml").read_text(encoding="utf-8"))
+    raw["paths"] = {
+        "raw_dir": "../data/raw",
+        "reference_dir": "../data/reference",
+        "decisions_file": "../data/decisions.xlsx",
+        "output_dir": "../output",
+    }
+    target.write_text(
+        yaml.safe_dump(raw, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
 
 
 @pytest.fixture

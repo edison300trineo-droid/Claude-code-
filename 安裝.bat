@@ -10,7 +10,8 @@ rem file that contains non-ASCII text slices the following lines apart and the
 rem fragments get executed as commands. All Chinese output lives in
 rem tools\setup.py instead.
 
-cd /d "%~dp0"
+rem pushd (not cd /d) so the folder can live on a UNC share.
+pushd "%~dp0" || (echo   [ERROR] Cannot reach "%~dp0" & pause & exit /b 1)
 set PYTHONIOENCODING=utf-8
 
 set "PY="
@@ -23,6 +24,7 @@ if not defined PY (
     echo   and be sure to tick "Add Python to PATH", then run this file again.
     echo.
     pause
+    popd
     exit /b 1
 )
 
@@ -32,6 +34,7 @@ if not exist "tools\setup.py" (
     echo   Extract the whole project folder and run this file from inside it.
     echo.
     pause
+    popd
     exit /b 1
 )
 
@@ -40,4 +43,5 @@ set EXITCODE=%errorlevel%
 
 echo.
 pause
+popd
 exit /b %EXITCODE%

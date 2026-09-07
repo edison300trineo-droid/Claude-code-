@@ -10,11 +10,17 @@ study_title: ELIXCYTE qPCR (Alu 序列) 生物分布數據統整表
 unit: "pg human DNA / 10 ng gDNA"
 
 paths:
-  # 相對於本設定檔所在資料夾；也可以填絕對路徑 (例如 NAS 的 UNC 路徑)。
-  raw_dir: "../data/raw"            # StepOnePlus export (.xls) 與參考檔案放這裡
-  reference_dir: "../data/reference" # 動物分組/性別/上機編號等參考檔
-  decisions_file: "../data/decisions.xlsx"  # 同仁填寫的人工決策表 (唯一可手動編輯的檔案)
-  output_dir: "../output"           # 產出的統整表與 manifest
+  # 資料放 NAS（同仁看得到），程式留在本機（C:\qpcr-biod）。
+  #
+  # ⚠ UNC 路徑一定要用「單引號」。YAML 的雙引號字串會把反斜線當跳脫字元，
+  #   寫成 "\\10.2.18.80\..." 會直接解析失敗。單引號內反斜線是字面值。
+  #
+  # 改回本機測試時，把下面四行換成相對路徑即可：
+  #   raw_dir: "../data/raw"   （相對路徑以本設定檔所在資料夾為基準）
+  raw_dir:        '\\10.2.18.80\05 ts\PT臨床前試驗中心\Edison Test\data\raw'
+  reference_dir:  '\\10.2.18.80\05 ts\PT臨床前試驗中心\Edison Test\data\reference'
+  decisions_file: '\\10.2.18.80\05 ts\PT臨床前試驗中心\Edison Test\data\decisions.xlsx'
+  output_dir:     '\\10.2.18.80\05 ts\PT臨床前試驗中心\Edison Test\output'
 
 # --- 標準曲線允收標準 (SHGLP-SOP-GE-001-F02 Rev.01) --------------------------
 standard_curve:
