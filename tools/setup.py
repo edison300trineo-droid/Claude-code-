@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / "config" / "BD-TS-20260701.yaml"
 MIN_PYTHON = (3, 10)
-STEPS = 5
+STEPS = 6
 
 
 def _setup_console() -> None:
@@ -74,8 +74,69 @@ def install_package() -> int:
     return 0
 
 
+BLOCKED_HINTS = (
+    "應用程式控制原則",           # 中文 Windows
+    "application control policy",  # 英文 Windows
+    "blocked by",
+)
+
+
+def verify_imports() -> int:
+    """在用到套件之前先確認它們真的載得起來。
+
+    pandas 與 numpy 帶編譯出來的 DLL。企業的應用程式控制原則(WDAC / AppLocker /
+    Smart App Control)常會封鎖使用者目錄下未簽章的 DLL，這時 pip 會安裝成功，
+    但一 import 就炸。與其讓使用者看到一整串 traceback，不如在這裡講清楚。
+    """
+    step(3, "確認套件可以載入...")
+    probe = (
+        "import pandas, numpy, openpyxl, xlrd, yaml; "
+        "print(pandas.__version__)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        say(f"      pandas {result.stdout.strip()} 可正常載入")
+        say()
+        return 0
+
+    message = (result.stderr or "").strip()
+    blocked = any(hint in message.lower() or hint in message
+                  for hint in BLOCKED_HINTS)
+
+    if blocked:
+        say()
+        say("  [錯誤] 套件裝好了，但作業系統不讓它載入。")
+        say()
+        say("  你的電腦有「應用程式控制原則」(Application Control)，")
+        say("  它封鎖了 numpy／pandas 附帶的編譯檔(.pyd/.dll)。")
+        say("  這是資訊安全政策，不是本專案的問題 —— 任何 Python 科學運算")
+        say("  套件在這台機器上都會遇到同樣的狀況。")
+        say()
+        say("  可以嘗試的方向（由快到慢）：")
+        say("    1. 檢查是否為 Smart App Control：設定 → 隱私權與安全性 →")
+        say("       Windows 安全性 → 應用程式與瀏覽器控制 → 智慧型應用程式控制")
+        say("    2. 把 Python 裝到 C:\\Program Files 之下（需要系統管理員），")
+        say("       有些原則只允許非使用者可寫入的路徑")
+        say("    3. 請 IT 將本專案資料夾與 Python 安裝路徑加入允許清單")
+        say()
+        say("  原始訊息：")
+        for line in message.splitlines()[-3:]:
+            say(f"    {line}")
+        say()
+        return 1
+
+    return fail(
+        "套件無法載入。",
+        "原始訊息：",
+        *[f"  {line}" for line in message.splitlines()[-5:]],
+    )
+
+
 def make_folders() -> int:
-    step(3, "建立資料夾...")
+    step(4, "建立資料夾...")
     for relative in ("data/raw", "data/reference", "output"):
         (ROOT / relative).mkdir(parents=True, exist_ok=True)
     say("      data\\raw、data\\reference、output 已就緒")
@@ -84,7 +145,7 @@ def make_folders() -> int:
 
 
 def make_decisions() -> int:
-    step(4, "準備人工決策表...")
+    step(5, "準備人工決策表...")
     if not CONFIG.is_file():
         return fail(
             f"找不到設定檔 {CONFIG.relative_to(ROOT)}",
@@ -97,7 +158,7 @@ def make_decisions() -> int:
 
 
 def self_test() -> int:
-    step(5, "執行自我測試，確認安裝正確...")
+    step(6, "執行自我測試，確認安裝正確...")
     if run("-m", "pytest", "-q") != 0:
         say()
         say("  [警告] 自我測試沒有全部通過。")
@@ -115,8 +176,8 @@ def main() -> int:
     say("=" * 60)
     say()
 
-    for stage in (check_python, install_package, make_folders,
-                  make_decisions, self_test):
+    for stage in (check_python, install_package, verify_imports,
+                  make_folders, make_decisions, self_test):
         code = stage()
         if code != 0:
             return code
