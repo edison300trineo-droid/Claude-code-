@@ -197,7 +197,7 @@ def _read_sheet(archive, path, shared, date_styles):
 
 
 def sheet_names(source):
-    with zipfile.ZipFile(_as_file(source)) as archive:
+    with _open_workbook(source) as archive:
         return [name for name, _ in sheet_targets(archive)]
 
 
@@ -207,20 +207,23 @@ def _as_file(source):
     return source
 
 
-def read_rows(source, sheet=None):
-    """讀取工作表內容，回傳 (工作表名稱, 所有工作表名稱, 資料列)。
-
-    sheet 可給名稱；省略時取第一個工作表。
-    """
+def _open_workbook(source):
+    """開啟 .xlsx；不是有效的 zip 就換成看得懂的訊息。"""
     try:
-        archive = zipfile.ZipFile(_as_file(source))
+        return zipfile.ZipFile(_as_file(source))
     except zipfile.BadZipFile:
         raise ValueError(
             "這個檔案不是有效的 Excel 檔（.xlsx）。若為舊版 .xls，"
             "請用 Excel 另存為 .xlsx 後再試一次。"
         )
 
-    with archive:
+
+def read_rows(source, sheet=None):
+    """讀取工作表內容，回傳 (工作表名稱, 所有工作表名稱, 資料列)。
+
+    sheet 可給名稱；省略時取第一個工作表。
+    """
+    with _open_workbook(source) as archive:
         if "xl/workbook.xml" not in archive.namelist():
             raise ValueError("Excel 檔內容不完整，找不到工作表資料。")
         sheets = sheet_targets(archive)

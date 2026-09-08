@@ -356,6 +356,15 @@ async function loadReport() {
 
 const ACTION_LABEL = { create: '新增', update: '更新', error: '無法匯入' };
 
+function emptyImportHint(info) {
+  const where = info.sheet ? `工作表「${info.sheet}」` : '這個檔案';
+  const others = (info.sheet_names || []).filter((n) => n !== info.sheet);
+  return `已在${where}的第 ${info.header_row} 列找到表頭，但底下沒有任何資料列。`
+    + '若這是空白範本，請先在 Excel 裡填入案件再匯入'
+    + (others.length ? `；若資料在其他工作表，請用上方「工作表」切換到：${others.join('、')}` : '')
+    + '。';
+}
+
 function resetImport() {
   state.importFile = null;
   state.importSheet = '';
@@ -443,7 +452,7 @@ function renderImportPreview(data) {
         <td class="act-${r.action}">${ACTION_LABEL[r.action] || r.action}</td>
         <td>${escapeHtml(r.message)}</td>
       </tr>`).join('')
-    : '<tr><td colspan="8" class="empty">這個檔案裡沒有可匯入的資料列</td></tr>';
+    : `<tr><td colspan="8" class="empty">${escapeHtml(emptyImportHint(info))}</td></tr>`;
 
   $('#import-commit').disabled = data.totals.create + data.totals.update === 0;
   $('#import-preview').hidden = false;

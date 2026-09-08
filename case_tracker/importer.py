@@ -1,8 +1,10 @@
 """從既有的 Excel（.xlsx／.xlsm）或 CSV 檔匯入案件。
 
 設計成能吃「公司原本就在用的表格」：表頭不必在第一列（上面可以有標題列、
-製表人、空白列），欄位順序不拘，欄名支援常見的中文寫法，日期支援西元、
-民國與 Excel 日期格式。無法辨識的列會逐列回報原因，不影響其他列。
+製表人、空白列），資料不在第一個工作表也會自動往後找，欄位順序不拘，欄名
+支援常見的中文寫法，日期支援西元、民國與 Excel 日期格式。CSV 不論存成
+UTF-8 或 Big5（Excel 中文版的預設）都能讀。無法辨識的列會逐列回報原因，
+不影響其他列。
 """
 
 import csv
@@ -68,6 +70,29 @@ DATE_PATTERNS = [
 ]
 
 
+# Excel 中文版另存的「CSV（逗號分隔）」是 Big5(cp950)，
+# 「CSV UTF-8」才是 UTF-8，兩種都要能讀。
+CSV_ENCODINGS = ["utf-8-sig", "cp950", "big5hkscs", "cp936", "utf-16"]
+
+
+def decode_text(raw):
+    """依序嘗試常見編碼，全部失敗才退回可容錯的解碼。"""
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return raw.decode("utf-16")
+    for encoding in CSV_ENCODINGS:
+        try:
+            return raw.decode(encoding)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
+def _delimiter(text):
+    """Excel 的「Unicode 文字」是以 Tab 分隔，一般 CSV 才是逗號。"""
+    first = text.split("\n", 1)[0]
+    return "\t" if first.count("\t") > first.count(",") else ","
+
+
 def normalise_header(text):
     return re.sub(r"[\s　*（）():：]+", "", str(text or "")).lstrip("﻿")
 
@@ -118,11 +143,12 @@ def load_rows(source, filename="", sheet=None):
         )
 
     if isinstance(source, (bytes, bytearray)):
-        text = bytes(source).decode("utf-8-sig", errors="replace")
+        raw = bytes(source)
     else:
-        with open(source, "r", encoding="utf-8-sig", newline="") as handle:
-            text = handle.read()
-    rows = [list(row) for row in csv.reader(io.StringIO(text))]
+        with open(source, "rb") as handle:
+            raw = handle.read()
+    text = decode_text(raw)
+    rows = [list(row) for row in csv.reader(io.StringIO(text), delimiter=_delimiter(text))]
     return rows, "", []
 
 
@@ -160,13 +186,41 @@ def rows_to_items(rows, header_index, mapping):
     return items
 
 
+def is_excel(filename):
+    return str(filename or "").lower().endswith((".xlsx", ".xlsm", ".xltx"))
+
+
 def read_items(source, filename="", sheet=None):
-    """讀檔並整理成可匯入的資料，回傳 (items, 讀取資訊)。"""
+    """讀檔並整理成可匯入的資料，回傳 (items, 讀取資訊)。
+
+    使用者沒指定工作表時，會由第一個工作表往後找，取第一個「有表頭」的
+    工作表——公司模板常把封面或說明放在第一頁。
+    """
+    if is_excel(filename) and not sheet:
+        names = xlsx_reader.sheet_names(source)
+        for candidate in names:
+            rows, used_sheet, sheet_names = load_rows(source, filename, candidate)
+            try:
+                header_index, mapping = find_header(rows)
+            except ValueError:
+                continue
+            return _build(rows, header_index, mapping, used_sheet, sheet_names)
+        raise ValueError(
+            f"這個檔案的工作表（{'、'.join(names)}）都找不到「案件編號」欄位。"
+            "請確認表格中有一列是欄位名稱，且其中一欄叫「案件編號」"
+            "（或編號、案號、報價單號）。"
+        )
+
     rows, used_sheet, sheet_names = load_rows(source, filename, sheet)
     header_index, mapping = find_header(rows)
+    return _build(rows, header_index, mapping, used_sheet, sheet_names)
+
+
+def _build(rows, header_index, mapping, used_sheet, sheet_names):
     items = rows_to_items(rows, header_index, mapping)
     info = {
         "sheet": used_sheet,
+        "data_rows": len(rows) - header_index - 1,
         "sheet_names": sheet_names,
         "header_row": header_index + 1,
         "columns": [

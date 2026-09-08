@@ -58,7 +58,8 @@ SHARED_STRINGS = [
 ]
 
 
-def build_xlsx(sheet_xml=SHEET_XML, strings=SHARED_STRINGS, sheet_name="案件清單"):
+def build_xlsx(sheet_xml=SHEET_XML, strings=SHARED_STRINGS, sheet_name="案件清單",
+               sheet2_xml=None):
     """組出一個最小但合法的 .xlsx，用來測試讀取器。"""
     ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
     rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -106,8 +107,12 @@ def build_xlsx(sheet_xml=SHEET_XML, strings=SHARED_STRINGS, sheet_name="案件�
         archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
         archive.writestr(
             "xl/worksheets/sheet2.xml",
-            f'<?xml version="1.0"?><worksheet xmlns="{ns}"><sheetData><row r="1">'
-            f'<c r="A1" t="inlineStr"><is><t>使用說明</t></is></c></row></sheetData></worksheet>',
+            sheet2_xml
+            or (
+                f'<?xml version="1.0"?><worksheet xmlns="{ns}"><sheetData><row r="1">'
+                f'<c r="A1" t="inlineStr"><is><t>使用說明</t></is></c></row>'
+                f"</sheetData></worksheet>"
+            ),
         )
     return buffer.getvalue()
 
@@ -594,6 +599,61 @@ class ImportTests(TempDbTestCase):
         self.assertEqual(created, 1)
         self.assertEqual(len(errors), 1)
         self.assertIn("QT114042", errors[0])
+
+    def test_big5_csv_from_excel(self):
+        """Excel 中文版另存的「CSV（逗號分隔）」是 Big5，不是 UTF-8。"""
+        path = os.path.join(self.tmp.name, "big5.csv")
+        with open(path, "wb") as handle:
+            handle.write(
+                "案件編號,客戶名稱,案件類型\r\nQT114701,宏碩生技,藥理試驗\r\n".encode("cp950")
+            )
+        created, _, _, errors, info = importer.import_file(self.conn, path)
+        self.assertEqual((created, errors), (1, []))
+        self.assertEqual(db.get_by_case_no(self.conn, "QT114701")["client"], "宏碩生技")
+        self.assertEqual(db.get_by_case_no(self.conn, "QT114701")["case_type"], "藥理試驗")
+
+    def test_utf16_tab_separated_text(self):
+        """Excel 的「Unicode 文字」是 UTF-16 且以 Tab 分隔。"""
+        path = os.path.join(self.tmp.name, "uni.txt")
+        with open(path, "wb") as handle:
+            handle.write(
+                "案件編號\t客戶名稱\r\nQT114702\t光宇製藥\r\n".encode("utf-16")
+            )
+        created, _, _, errors, _ = importer.import_file(self.conn, path)
+        self.assertEqual((created, errors), (1, []))
+        self.assertEqual(db.get_by_case_no(self.conn, "QT114702")["client"], "光宇製藥")
+
+    def test_data_on_a_later_sheet_is_found(self):
+        """公司模板常把封面或說明放第一頁，資料在後面的工作表。"""
+        cover = """<?xml version="1.0"?><worksheet xmlns="{ns}"><sheetData>
+        <row r="1"><c r="A1" t="inlineStr"><is><t>案件管理總表</t></is></c></row>
+        </sheetData></worksheet>""".format(
+            ns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+        )
+        raw = build_xlsx(sheet_xml=cover, sheet_name="封面", sheet2_xml=SHEET_XML)
+        # 指定封面時照使用者的意思報錯，不自作主張
+        with self.assertRaises(ValueError):
+            importer.read_items(raw, "x.xlsx", sheet="封面")
+        # 沒指定時應自動改用有表頭的第二個工作表
+        items, info = importer.read_items(raw, "x.xlsx")
+        self.assertEqual(info["sheet"], "說明")
+        self.assertEqual([i["case_no"] for i in items], ["QT114201", "QT114202"])
+
+    def test_all_sheets_without_header_reports_every_sheet(self):
+        cover = """<?xml version="1.0"?><worksheet xmlns="{ns}"><sheetData>
+        <row r="1"><c r="A1" t="inlineStr"><is><t>沒有表頭</t></is></c></row>
+        </sheetData></worksheet>""".format(
+            ns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+        )
+        with self.assertRaises(ValueError) as ctx:
+            importer.read_items(build_xlsx(sheet_xml=cover, sheet_name="封面"), "x.xlsx")
+        self.assertIn("封面", str(ctx.exception))
+        self.assertIn("說明", str(ctx.exception))
+
+    def test_info_reports_row_count_below_header(self):
+        items, info = importer.read_items(build_xlsx(), "x.xlsx")
+        self.assertEqual(info["data_rows"], 3)  # 兩列資料加一列註記
+        self.assertEqual(len(items), 2)
 
     def test_missing_case_no_column(self):
         path = self._write("客戶名稱\r\n宏碩生技\r\n")

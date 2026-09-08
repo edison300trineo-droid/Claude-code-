@@ -133,6 +133,9 @@ input:focus, select:focus, textarea:focus {
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .btn.primary:hover { background: #26424f; }
 .btn.ghost { background: transparent; border-color: var(--rule); color: var(--ink-soft); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn:disabled:hover { background: #fff; }
+.btn.primary:disabled:hover { background: var(--accent); }
 
 .icon-btn {
   background: none; border: none; cursor: pointer;
