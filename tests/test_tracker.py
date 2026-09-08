@@ -15,7 +15,7 @@ from xml.etree import ElementTree
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from case_tracker import db, export, importer, models, report, server  # noqa: E402
+from case_tracker import db, export, importer, models, report, server, xlsx_reader  # noqa: E402
 
 TODAY = date(2026, 9, 6)
 
@@ -36,6 +36,117 @@ def sample(**overrides):
     }
     data.update(overrides)
     return data
+
+
+SHEET_XML = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+<row r="1"><c r="A1" t="s"><v>0</v></c></row>
+<row r="3"><c r="A3" t="s"><v>1</v></c><c r="B3" t="s"><v>2</v></c>
+<c r="C3" t="s"><v>3</v></c><c r="E3" t="s"><v>4</v></c></row>
+<row r="4"><c r="A4" t="s"><v>5</v></c><c r="B4" t="s"><v>6</v></c>
+<c r="C4" s="1"><v>46310</v></c><c r="E4" t="s"><v>7</v></c></row>
+<row r="5"><c r="A5" t="inlineStr"><is><t>QT114202</t></is></c>
+<c r="B5" t="s"><v>8</v></c><c r="C5" t="str"><v>115/1/15</v></c></row>
+<row r="6"><c r="D6" t="s"><v>9</v></c></row>
+</sheetData></worksheet>"""
+
+SHARED_STRINGS = [
+    "委託案件追蹤表", "案件編號", "客戶名稱", "預計完成日", "案件類型",
+    "QT114201", "宏碩生技", "藥理試驗", "光宇製藥", "以上為本月新增",
+]
+
+
+def build_xlsx(sheet_xml=SHEET_XML, strings=SHARED_STRINGS, sheet_name="案件清單"):
+    """組出一個最小但合法的 .xlsx，用來測試讀取器。"""
+    ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    pkg = "http://schemas.openxmlformats.org/package/2006/relationships"
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            f'<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org'
+            f'/package/2006/content-types"><Default Extension="rels" ContentType='
+            f'"application/vnd.openxmlformats-package.relationships+xml"/>'
+            f'<Default Extension="xml" ContentType="application/xml"/></Types>',
+        )
+        archive.writestr(
+            "_rels/.rels",
+            f'<?xml version="1.0"?><Relationships xmlns="{pkg}"><Relationship Id="rId1"'
+            f' Type="{rel}/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+        )
+        archive.writestr(
+            "xl/workbook.xml",
+            f'<?xml version="1.0"?><workbook xmlns="{ns}" xmlns:r="{rel}"><sheets>'
+            f'<sheet name="{sheet_name}" sheetId="1" r:id="rId1"/>'
+            f'<sheet name="說明" sheetId="2" r:id="rId2"/></sheets></workbook>',
+        )
+        archive.writestr(
+            "xl/_rels/workbook.xml.rels",
+            f'<?xml version="1.0"?><Relationships xmlns="{pkg}">'
+            f'<Relationship Id="rId1" Type="{rel}/worksheet" Target="worksheets/sheet1.xml"/>'
+            f'<Relationship Id="rId2" Type="{rel}/worksheet" Target="worksheets/sheet2.xml"/>'
+            f'<Relationship Id="rId3" Type="{rel}/styles" Target="styles.xml"/>'
+            f'<Relationship Id="rId4" Type="{rel}/sharedStrings" Target="sharedStrings.xml"/>'
+            f"</Relationships>",
+        )
+        items = "".join(f"<si><t>{text}</t></si>" for text in strings)
+        archive.writestr(
+            "xl/sharedStrings.xml",
+            f'<?xml version="1.0"?><sst xmlns="{ns}" count="{len(strings)}">{items}</sst>',
+        )
+        archive.writestr(
+            "xl/styles.xml",
+            f'<?xml version="1.0"?><styleSheet xmlns="{ns}"><cellXfs count="2">'
+            f'<xf numFmtId="0"/><xf numFmtId="14" applyNumberFormat="1"/>'
+            f"</cellXfs></styleSheet>",
+        )
+        archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+        archive.writestr(
+            "xl/worksheets/sheet2.xml",
+            f'<?xml version="1.0"?><worksheet xmlns="{ns}"><sheetData><row r="1">'
+            f'<c r="A1" t="inlineStr"><is><t>使用說明</t></is></c></row></sheetData></worksheet>',
+        )
+    return buffer.getvalue()
+
+
+class XlsxReaderTests(unittest.TestCase):
+    def test_reads_shared_strings_and_sparse_cells(self):
+        name, names, rows = xlsx_reader.read_rows(build_xlsx())
+        self.assertEqual(name, "案件清單")
+        self.assertEqual(names, ["案件清單", "說明"])
+        self.assertEqual(rows[0], ["委託案件追蹤表"])
+        # 第 2 列在 Excel 是空白列，要保留，列號才對得上
+        self.assertEqual(rows[1], [])
+        # D 欄在表頭是空的，讀出來要保留位置，欄位才不會錯位
+        self.assertEqual(rows[2], ["案件編號", "客戶名稱", "預計完成日", "", "案件類型"])
+
+    def test_date_styled_cell_becomes_iso_date(self):
+        _, _, rows = xlsx_reader.read_rows(build_xlsx())
+        self.assertEqual(rows[3][2], "2026-10-15")
+
+    def test_inline_and_formula_strings(self):
+        _, _, rows = xlsx_reader.read_rows(build_xlsx())
+        self.assertEqual(rows[4][0], "QT114202")
+        self.assertEqual(rows[4][2], "115/1/15")
+
+    def test_named_sheet_and_missing_sheet(self):
+        name, _, rows = xlsx_reader.read_rows(build_xlsx(), sheet="說明")
+        self.assertEqual(name, "說明")
+        self.assertEqual(rows[0], ["使用說明"])
+        with self.assertRaises(xlsx_reader.SheetNotFound):
+            xlsx_reader.read_rows(build_xlsx(), sheet="不存在")
+
+    def test_not_a_zip_file(self):
+        with self.assertRaises(ValueError):
+            xlsx_reader.read_rows(b"this is not a spreadsheet")
+
+    def test_reads_files_this_project_exports(self):
+        raw = export.to_xlsx([models.decorate(sample(), TODAY)])
+        _, _, rows = xlsx_reader.read_rows(raw)
+        self.assertEqual(rows[0][0], "案件編號")
+        self.assertEqual(rows[1][0], "QT114001")
+        self.assertEqual(rows[1][7], "2026-09-20")  # 到期日欄還原成日期
 
 
 class TempDbTestCase(unittest.TestCase):
@@ -167,6 +278,18 @@ class MigrationTests(unittest.TestCase):
         )
         self.assertEqual(updated["contract_no"], "C-114-021")
         self.assertEqual(updated["study_no"], "TMT-114-003")
+
+
+class CaseTypeTests(unittest.TestCase):
+    def test_new_types_are_available(self):
+        self.assertIn("藥理試驗", models.CASE_TYPES)
+        self.assertIn("Pilot study", models.CASE_TYPES)
+
+    def test_new_types_pass_validation(self):
+        for case_type in ("藥理試驗", "Pilot study"):
+            with self.subTest(case_type=case_type):
+                clean = models.validate(sample(case_type=case_type))
+                self.assertEqual(clean["case_type"], case_type)
 
 
 class DueStateTests(unittest.TestCase):
@@ -374,11 +497,13 @@ class ExportTests(unittest.TestCase):
 
 
 class ImportTests(TempDbTestCase):
-    def _write(self, text):
-        path = os.path.join(self.tmp.name, "in.csv")
+    def _write(self, text, name="in.csv"):
+        path = os.path.join(self.tmp.name, name)
         with open(path, "w", encoding="utf-8-sig", newline="") as handle:
             handle.write(text)
         return path
+
+    # ---------------- CSV ----------------
 
     def test_import_chinese_headers(self):
         path = self._write(
@@ -386,8 +511,8 @@ class ImportTests(TempDbTestCase):
             "QT114031,C-114-021,TMT-114-003,宏碩生技,GLP 研究,試驗執行中,2026/9/20,陳彥廷,進行中\r\n"
             "QT114032,C-114-021,,光宇製藥,稽核,QA 審查,20261001,王孟儒,需留意\r\n"
         )
-        created, updated, errors = importer.import_csv(self.conn, path)
-        self.assertEqual((created, updated, errors), (2, 0, []))
+        created, updated, skipped, errors, _ = importer.import_file(self.conn, path)
+        self.assertEqual((created, updated, skipped, errors), (2, 0, 0, []))
         row = db.get_by_case_no(self.conn, "QT114031")
         self.assertEqual(row["due_date"], "2026-09-20")
         self.assertEqual(row["contract_no"], "C-114-021")
@@ -396,17 +521,27 @@ class ImportTests(TempDbTestCase):
 
     def test_reimport_updates_existing(self):
         path = self._write("案件編號,負責人\r\nQT114031,甲\r\n")
-        importer.import_csv(self.conn, path)
-        path2 = self._write("案件編號,負責人\r\nQT114031,乙\r\n")
-        created, updated, errors = importer.import_csv(self.conn, path2)
+        importer.import_file(self.conn, path)
+        path2 = self._write("案件編號,負責人\r\nQT114031,乙\r\n", "in2.csv")
+        created, updated, _, _, _ = importer.import_file(self.conn, path2)
         self.assertEqual((created, updated), (0, 1))
         self.assertEqual(db.get_by_case_no(self.conn, "QT114031")["owner"], "乙")
+
+    def test_no_update_flag_skips_existing(self):
+        path = self._write("案件編號,負責人\r\nQT114031,甲\r\n")
+        importer.import_file(self.conn, path)
+        path2 = self._write("案件編號,負責人\r\nQT114031,乙\r\n", "in2.csv")
+        created, updated, skipped, _, _ = importer.import_file(
+            self.conn, path2, update_existing=False
+        )
+        self.assertEqual((created, updated, skipped), (0, 0, 1))
+        self.assertEqual(db.get_by_case_no(self.conn, "QT114031")["owner"], "甲")
 
     def test_bad_rows_are_reported_not_fatal(self):
         path = self._write(
             "案件編號,案件類型\r\nQT114041,稽核\r\nQT114042,不存在的類型\r\n"
         )
-        created, _, errors = importer.import_csv(self.conn, path)
+        created, _, _, errors, _ = importer.import_file(self.conn, path)
         self.assertEqual(created, 1)
         self.assertEqual(len(errors), 1)
         self.assertIn("QT114042", errors[0])
@@ -414,7 +549,74 @@ class ImportTests(TempDbTestCase):
     def test_missing_case_no_column(self):
         path = self._write("客戶名稱\r\n宏碩生技\r\n")
         with self.assertRaises(ValueError):
-            importer.import_csv(self.conn, path)
+            importer.import_file(self.conn, path)
+
+    # ---------------- Excel ----------------
+
+    def test_import_xlsx_with_title_rows_and_alias_headers(self):
+        items, info = importer.read_items(build_xlsx(), "模板.xlsx")
+        self.assertEqual(info["sheet"], "案件清單")
+        self.assertEqual(info["header_row"], 3)  # 表頭不在第一列
+        self.assertEqual(
+            {c["label"]: c["field"] for c in info["columns"]},
+            {"案件編號": "case_no", "客戶名稱": "client",
+             "預計完成日": "due_date", "案件類型": "case_type"},
+        )
+        created, updated, _, errors, = importer.commit(self.conn, items, "測試員")[:4]
+        self.assertEqual((created, updated, errors), (2, 0, []))
+        self.assertEqual(db.get_by_case_no(self.conn, "QT114201")["due_date"], "2026-10-15")
+        self.assertEqual(db.get_by_case_no(self.conn, "QT114201")["case_type"], "藥理試驗")
+
+    def test_minguo_date_is_converted(self):
+        items, _ = importer.read_items(build_xlsx(), "模板.xlsx")
+        importer.commit(self.conn, items, "測試員")
+        # 115/1/15 為民國年寫法
+        self.assertEqual(db.get_by_case_no(self.conn, "QT114202")["due_date"], "2026-01-15")
+
+    def test_trailing_note_rows_are_ignored(self):
+        items, _ = importer.read_items(build_xlsx(), "模板.xlsx")
+        self.assertEqual([i["case_no"] for i in items], ["QT114201", "QT114202"])
+
+    def test_missing_fields_get_defaults(self):
+        items, _ = importer.read_items(build_xlsx(), "模板.xlsx")
+        importer.commit(self.conn, items, "測試員")
+        row = db.get_by_case_no(self.conn, "QT114202")
+        self.assertEqual(row["stage"], models.STAGES[0])
+        self.assertEqual(row["status"], models.STATUSES[0])
+
+    def test_named_sheet_without_table_is_reported(self):
+        with self.assertRaises(ValueError):
+            importer.read_items(build_xlsx(), "模板.xlsx", sheet="說明")
+
+    def test_xls_is_rejected_with_guidance(self):
+        with self.assertRaises(ValueError) as ctx:
+            importer.load_rows(b"anything", "舊檔.xls")
+        self.assertIn("另存新檔", str(ctx.exception))
+
+    # ---------------- 預覽 ----------------
+
+    def test_plan_reports_create_update_and_errors(self):
+        db.create_case(self.conn, sample(case_no="QT114201"))
+        path = self._write(
+            "案件編號,案件類型\r\n"
+            "QT114201,稽核\r\n"      # 已存在 -> 更新
+            "QT114301,Pilot study\r\n"  # 新增
+            "QT114301,稽核\r\n"      # 檔案內重複
+            "AB999,稽核\r\n"         # 編號不合規
+        )
+        items, _ = importer.read_items(path, "in.csv")
+        result = importer.plan(self.conn, items)
+        self.assertEqual(result["totals"],
+                         {"create": 1, "update": 1, "error": 2, "total": 4})
+        actions = [row["action"] for row in result["rows"]]
+        self.assertEqual(actions, ["update", "create", "error", "error"])
+        self.assertIn("已有相同案件編號", result["rows"][2]["message"])
+
+    def test_plan_does_not_write(self):
+        path = self._write("案件編號\r\nQT114301\r\n")
+        items, _ = importer.read_items(path, "in.csv")
+        importer.plan(self.conn, items)
+        self.assertIsNone(db.get_by_case_no(self.conn, "QT114301"))
 
 
 class ApiTests(TempDbTestCase):
@@ -524,6 +726,60 @@ class ApiTests(TempDbTestCase):
         status, payload = self.json_request("GET", "/api/report/weekly?days=7")
         self.assertEqual(status, 200)
         self.assertEqual(payload["totals"]["overdue"], 1)
+
+    def _upload(self, path, data):
+        url = f"http://127.0.0.1:{self.port}{path}"
+        req = urllib.request.Request(url, data=data, method="POST")
+        req.add_header("Content-Type", "application/octet-stream")
+        req.add_header("X-Operator", "%E6%B8%AC%E8%A9%A6%E5%93%A1")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as response:
+                return response.status, json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read().decode("utf-8"))
+
+    def test_import_preview_then_commit(self):
+        data = build_xlsx()
+        status, preview = self._upload("/api/import/preview?filename=%E6%A8%A1%E6%9D%BF.xlsx", data)
+        self.assertEqual(status, 200)
+        self.assertEqual(preview["totals"], {"create": 2, "update": 0, "error": 0, "total": 2})
+        self.assertEqual(preview["info"]["header_row"], 3)
+        self.assertEqual(preview["info"]["sheet_names"], ["案件清單", "說明"])
+        # 預覽不可以寫入資料庫
+        self.assertEqual(self.json_request("GET", "/api/cases")[1]["count"], 0)
+
+        status, result = self._upload("/api/import/commit?filename=%E6%A8%A1%E6%9D%BF.xlsx", data)
+        self.assertEqual(status, 200)
+        self.assertEqual((result["created"], result["updated"], result["errors"]), (2, 0, []))
+        self.assertEqual(self.json_request("GET", "/api/cases")[1]["count"], 2)
+
+        # 再匯入同一份檔案：不會重複新增，兩筆都走更新
+        status, again = self._upload("/api/import/commit?filename=%E6%A8%A1%E6%9D%BF.xlsx", data)
+        self.assertEqual((again["created"], again["updated"]), (0, 2))
+        self.assertEqual(self.json_request("GET", "/api/cases")[1]["count"], 2)
+
+    def test_import_commit_can_skip_existing(self):
+        data = build_xlsx()
+        self._upload("/api/import/commit?filename=a.xlsx", data)
+        status, result = self._upload(
+            "/api/import/commit?filename=a.xlsx&update_existing=0", data
+        )
+        self.assertEqual((result["created"], result["updated"], result["skipped"]), (0, 0, 2))
+
+    def test_import_rejects_unreadable_file(self):
+        status, payload = self._upload("/api/import/preview?filename=x.xlsx", b"not a workbook")
+        self.assertEqual(status, 400)
+        self.assertIn("Excel", payload["error"])
+
+    def test_import_reports_missing_header(self):
+        csv_bytes = "客戶名稱,負責人\r\n宏碩生技,陳彥廷\r\n".encode("utf-8-sig")
+        status, payload = self._upload("/api/import/preview?filename=x.csv", csv_bytes)
+        self.assertEqual(status, 400)
+        self.assertIn("案件編號", payload["error"])
+
+    def test_import_without_body_is_rejected(self):
+        status, payload = self._upload("/api/import/preview?filename=x.csv", b"")
+        self.assertEqual(status, 400)
 
     def test_unknown_api_path(self):
         self.assertEqual(self.request("GET", "/api/nope")[0], 404)

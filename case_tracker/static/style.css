@@ -348,6 +348,45 @@ td.act { white-space: nowrap; text-align: right; }
   padding-top: 10px;
 }
 
+/* ---------------- 匯入 ---------------- */
+
+.import-body { padding: 14px; }
+
+.import-pick { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.file-btn { cursor: pointer; }
+
+.import-hint {
+  margin: 12px 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--rule-strong);
+  background: var(--panel-alt);
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.import-table-wrap {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--rule-strong);
+}
+
+.import-table-wrap table { min-width: 900px; }
+.col-row { width: 68px; }
+
+.import-result {
+  border: 1px solid var(--accent);
+  background: #eef2f4;
+  color: var(--ink);
+  padding: 8px 10px;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.act-create { color: var(--ongoing); font-weight: 600; }
+.act-update { color: var(--watch); font-weight: 600; }
+.act-error  { color: var(--late); font-weight: 600; }
+
 /* ---------------- 摘要報表 ---------------- */
 
 .report-body { padding: 14px; }

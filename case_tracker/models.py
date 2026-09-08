@@ -4,6 +4,8 @@ from datetime import date, datetime
 
 CASE_TYPES = [
     "GLP 研究",
+    "藥理試驗",
+    "Pilot study",
     "方法確效",
     "生物分析",
     "稽核",

@@ -11,6 +11,8 @@ const state = {
   dir: 'asc',
   editingId: null,
   editingRev: null,
+  importFile: null,
+  importSheet: '',
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -349,6 +351,131 @@ async function loadReport() {
 }
 
 /* ------------------------------------------------------------------ */
+/* 匯入 Excel／CSV                                                      */
+/* ------------------------------------------------------------------ */
+
+const ACTION_LABEL = { create: '新增', update: '更新', error: '無法匯入' };
+
+function resetImport() {
+  state.importFile = null;
+  state.importSheet = '';
+  $('#import-filename').textContent = '尚未選擇檔案';
+  $('#import-file').value = '';
+  $('#import-preview').hidden = true;
+  $('#import-error').hidden = true;
+  $('#import-result').hidden = true;
+  $('#import-sheet-wrap').hidden = true;
+}
+
+function showImportError(message) {
+  const box = $('#import-error');
+  box.textContent = message;
+  box.hidden = false;
+  $('#import-preview').hidden = true;
+}
+
+async function sendImport(kind) {
+  const file = state.importFile;
+  const params = new URLSearchParams({ filename: file.name });
+  if (state.importSheet) params.set('sheet', state.importSheet);
+  if (kind === 'commit' && !$('#import-update').checked) {
+    params.set('update_existing', '0');
+  }
+  const response = await fetch(`/api/import/${kind}?${params.toString()}`, {
+    method: 'POST',
+    headers: { 'X-Operator': encodeURIComponent(operatorName()) },
+    body: await file.arrayBuffer(),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error((payload && payload.error) || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+async function previewImport() {
+  if (!state.importFile) return;
+  $('#import-error').hidden = true;
+  $('#import-result').hidden = true;
+  try {
+    const data = await sendImport('preview');
+    renderImportPreview(data);
+  } catch (err) {
+    showImportError(err.message);
+  }
+}
+
+function renderImportPreview(data) {
+  const info = data.info || {};
+
+  const sheetWrap = $('#import-sheet-wrap');
+  if ((info.sheet_names || []).length > 1) {
+    fillSelect($('#import-sheet'), info.sheet_names);
+    $('#import-sheet').value = info.sheet || info.sheet_names[0];
+    state.importSheet = $('#import-sheet').value;
+    sheetWrap.hidden = false;
+  } else {
+    sheetWrap.hidden = true;
+  }
+
+  const mapped = (info.columns || [])
+    .map((c) => `${c.label}→${(state.meta.field_labels || {})[c.field] || c.field}`)
+    .join('、');
+  const ignored = (info.ignored_columns || []).join('、');
+  $('#import-info').textContent =
+    `${info.sheet ? `工作表「${info.sheet}」　` : ''}表頭在第 ${info.header_row} 列　`
+    + `對應欄位：${mapped || '（無）'}`
+    + (ignored ? `　未使用的欄位：${ignored}` : '');
+
+  $('#tile-create').textContent = data.totals.create;
+  $('#tile-update').textContent = data.totals.update;
+  $('#tile-error').textContent = data.totals.error;
+
+  $('#import-rows').innerHTML = data.rows.length
+    ? data.rows.map((r) => `
+      <tr>
+        <td class="date">${r.row}</td>
+        <td class="case-no">${escapeHtml(r.case_no)}</td>
+        <td>${escapeHtml(r.client)}</td>
+        <td>${escapeHtml(r.case_type)}</td>
+        <td class="date">${escapeHtml(r.due_date) || '—'}</td>
+        <td>${escapeHtml(r.owner)}</td>
+        <td class="act-${r.action}">${ACTION_LABEL[r.action] || r.action}</td>
+        <td>${escapeHtml(r.message)}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="8" class="empty">這個檔案裡沒有可匯入的資料列</td></tr>';
+
+  $('#import-commit').disabled = data.totals.create + data.totals.update === 0;
+  $('#import-preview').hidden = false;
+}
+
+async function commitImport() {
+  const button = $('#import-commit');
+  button.disabled = true;
+  button.textContent = '匯入中…';
+  try {
+    const data = await sendImport('commit');
+    const box = $('#import-result');
+    box.innerHTML =
+      `匯入完成：新增 ${data.created} 筆、更新 ${data.updated} 筆`
+      + (data.skipped ? `、略過 ${data.skipped} 筆` : '')
+      + (data.errors.length
+        ? `。有 ${data.errors.length} 列未匯入：<br>` + data.errors.map(escapeHtml).join('<br>')
+        : '。');
+    box.hidden = false;
+    $('#import-preview').hidden = true;
+    toast(`匯入完成：新增 ${data.created}、更新 ${data.updated}`);
+    await loadMeta();
+    await loadCases();
+  } catch (err) {
+    showImportError(err.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = '確認匯入';
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* 事件綁定                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -412,6 +539,7 @@ function bind() {
     btn.addEventListener('click', () => {
       closeModal('#case-modal');
       closeModal('#report-modal');
+      closeModal('#import-modal');
     });
   });
 
@@ -425,12 +553,34 @@ function bind() {
     if (event.key === 'Escape') {
       closeModal('#case-modal');
       closeModal('#report-modal');
+      closeModal('#import-modal');
     }
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)
         && !$('#case-modal').hidden) {
       $('#case-form').requestSubmit();
     }
   });
+
+  $('#btn-import').addEventListener('click', () => {
+    resetImport();
+    openModal('#import-modal');
+  });
+
+  $('#import-file').addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    state.importFile = file;
+    state.importSheet = '';
+    $('#import-filename').textContent = file.name;
+    previewImport();
+  });
+
+  $('#import-sheet').addEventListener('change', (event) => {
+    state.importSheet = event.target.value;
+    previewImport();
+  });
+
+  $('#import-commit').addEventListener('click', commitImport);
 
   $('#btn-report').addEventListener('click', async () => {
     openModal('#report-modal');

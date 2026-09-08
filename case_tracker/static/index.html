@@ -41,6 +41,7 @@
   <div class="toolbar-line">
     <button id="btn-new" class="btn primary" type="button">＋ 新增案件</button>
     <button id="btn-report" class="btn" type="button">本週到期摘要</button>
+    <button id="btn-import" class="btn" type="button">匯入 Excel／CSV</button>
     <span class="spacer"></span>
     <span class="export-label">匯出目前清單</span>
     <a id="export-xlsx" class="btn" href="#">Excel (.xlsx)</a>
@@ -152,6 +153,65 @@
       </div>
     </div>
     <div id="report-body" class="report-body"></div>
+  </div>
+</div>
+
+<!-- 匯入 Excel / CSV -->
+<div id="import-modal" class="modal" hidden>
+  <div class="modal-box wide">
+    <div class="modal-head">
+      <h2>匯入 Excel／CSV</h2>
+      <button class="icon-btn" type="button" data-close>✕</button>
+    </div>
+    <div class="import-body">
+      <div class="import-pick">
+        <label class="btn primary file-btn">
+          選擇檔案…
+          <input id="import-file" type="file" accept=".xlsx,.xlsm,.csv" hidden>
+        </label>
+        <span id="import-filename" class="mono muted">尚未選擇檔案</span>
+        <label class="field inline" id="import-sheet-wrap" hidden><span>工作表</span>
+          <select id="import-sheet"></select>
+        </label>
+      </div>
+
+      <p class="import-hint">
+        可直接丟現有的 Excel 表格。表頭不必在第一列（上方可以有標題、製表人、
+        空白列），欄位順序不拘；系統會自動辨識「案件編號、合約編號、研究編號、
+        客戶名稱、案件類型、目前階段、下一個里程碑、到期日、負責人、狀態、備註」
+        等欄名。案件編號必須以 QT 開頭；已存在的編號會更新該筆資料。
+        <strong>匯入前會先給你看一份預覽，確認後才寫入。</strong>
+      </p>
+
+      <div id="import-error" class="form-error" hidden></div>
+      <div id="import-result" class="import-result" hidden></div>
+
+      <div id="import-preview" hidden>
+        <div id="import-info" class="report-meta"></div>
+        <div class="report-tiles">
+          <div class="tile"><div class="n" id="tile-create">0</div><div class="k">將新增</div></div>
+          <div class="tile"><div class="n" id="tile-update">0</div><div class="k">將更新</div></div>
+          <div class="tile alert"><div class="n" id="tile-error">0</div><div class="k">無法匯入</div></div>
+        </div>
+        <div class="import-table-wrap">
+          <table id="import-rows-table">
+            <thead><tr>
+              <th class="col-row">檔案列</th><th class="col-no">案件編號</th>
+              <th>客戶名稱</th><th>類型</th><th class="col-date">到期日</th>
+              <th>負責人</th><th class="col-due">處理方式</th><th>說明</th>
+            </tr></thead>
+            <tbody id="import-rows"></tbody>
+          </table>
+        </div>
+        <div class="modal-foot">
+          <label class="check"><input id="import-update" type="checkbox" checked>
+            已存在的案件編號一併更新</label>
+          <span class="spacer"></span>
+          <button type="button" class="btn ghost" data-close>取消</button>
+          <button id="import-commit" type="button" class="btn primary">確認匯入</button>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 

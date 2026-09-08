@@ -9,11 +9,12 @@ from datetime import date
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import __version__, db, export, models, report
+from . import __version__, db, export, importer, models, report
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 MAX_BODY = 1 * 1024 * 1024  # 1 MB，足夠單筆案件
+MAX_UPLOAD = 20 * 1024 * 1024  # 匯入用的 Excel／CSV 上限
 
 CASE_ID_RE = re.compile(r"^/api/cases/(\d+)$")
 CASE_HISTORY_RE = re.compile(r"^/api/cases/(\d+)/history$")
@@ -87,6 +88,26 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict):
             raise ApiError(HTTPStatus.BAD_REQUEST, "請求內容須為 JSON 物件")
         return payload
+
+    def _read_binary(self):
+        """讀取上傳的檔案內容（前端直接送出原始位元組，不用 multipart）。"""
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "沒有收到檔案內容")
+        if length > MAX_UPLOAD:
+            raise ApiError(
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                f"檔案超過 {MAX_UPLOAD // (1024 * 1024)} MB 上限",
+            )
+        data = bytearray()
+        while len(data) < length:
+            chunk = self.rfile.read(min(65536, length - len(data)))
+            if not chunk:
+                break
+            data.extend(chunk)
+        if len(data) < length:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "檔案上傳未完成，請重試")
+        return bytes(data)
 
     def _operator(self, query, payload=None):
         """操作者名稱：body > query > header。"""
@@ -253,6 +274,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
             raise ApiError(HTTPStatus.METHOD_NOT_ALLOWED, "不支援的方法")
 
+        if path in ("/api/import/preview", "/api/import/commit") and method == "POST":
+            self._handle_import(conn, path, query)
+            return
+
         if path == "/api/activity" and method == "GET":
             self._send_json({"items": db.recent_activity(conn)})
             return
@@ -267,6 +292,36 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         raise ApiError(HTTPStatus.NOT_FOUND, f"未知的 API 路徑：{path}")
+
+    def _handle_import(self, conn, path, query):
+        filename = (query.get("filename") or [""])[0]
+        sheet = (query.get("sheet") or [""])[0] or None
+        update_existing = (query.get("update_existing") or ["1"])[0] != "0"
+        data = self._read_binary()
+
+        try:
+            items, info = importer.read_items(data, filename, sheet)
+        except ValueError as exc:  # 檔案格式或表頭問題，訊息可直接給使用者看
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        if path.endswith("/preview"):
+            result = importer.plan(conn, items)
+            self._send_json({"info": info, **result})
+            return
+
+        operator = self._operator(query) or "import"
+        created, updated, skipped, errors = importer.commit(
+            conn, items, operator, update_existing
+        )
+        self._send_json(
+            {
+                "info": info,
+                "created": created,
+                "updated": updated,
+                "skipped": skipped,
+                "errors": errors,
+            }
+        )
 
     @staticmethod
     def _window_days(query):

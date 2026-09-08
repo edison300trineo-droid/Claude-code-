@@ -6,7 +6,8 @@
     python3 run.py --port 9000           # 指定埠號
     python3 run.py report --days 14      # 在終端機列印到期／逾期摘要
     python3 run.py export 案件清單.xlsx    # 匯出全部案件（.xlsx 或 .csv）
-    python3 run.py import 既有清單.csv     # 由現有試算表匯入（CSV UTF-8）
+    python3 run.py import 既有清單.xlsx    # 由現有 Excel／CSV 匯入
+    python3 run.py import 清單.xlsx --dry-run   # 只試算不寫入
     python3 run.py seed-demo             # 寫入示範資料（僅限空資料庫）
 """
 
@@ -106,10 +107,40 @@ def cmd_export(args):
 
 def cmd_import(args):
     db.configure(args.db)
-    created, updated, errors = importer.import_csv(
-        db.connect(), args.input, args.operator, update_existing=not args.no_update
+    conn = db.connect()
+    try:
+        items, info = importer.read_items(
+            args.input, os.path.basename(args.input), args.sheet
+        )
+    except (ValueError, OSError) as exc:
+        print(f"讀取失敗：{exc}", file=sys.stderr)
+        return 2
+
+    if info.get("sheet"):
+        print(f"工作表：{info['sheet']}（檔案內有：{'、'.join(info['sheet_names'])}）")
+    print(f"表頭在第 {info['header_row']} 列，對應到的欄位：")
+    for column in info["columns"]:
+        print(f"  {column['label']} → {dict(models.FIELD_LABELS)[column['field']]}")
+    if info["ignored_columns"]:
+        print(f"未使用的欄位：{'、'.join(info['ignored_columns'])}")
+
+    if args.dry_run:
+        result = importer.plan(conn, items)
+        totals = result["totals"]
+        print(
+            f"\n試算結果（未寫入）：將新增 {totals['create']} 筆、"
+            f"更新 {totals['update']} 筆、無法匯入 {totals['error']} 筆"
+        )
+        for row in result["rows"]:
+            if row["action"] == "error":
+                print(f"  第 {row['row']} 列（{row['case_no']}）：{row['message']}",
+                      file=sys.stderr)
+        return 0
+
+    created, updated, skipped, errors = importer.commit(
+        conn, items, args.operator, update_existing=not args.no_update
     )
-    print(f"新增 {created} 筆、更新 {updated} 筆。")
+    print(f"\n新增 {created} 筆、更新 {updated} 筆" + (f"、略過 {skipped} 筆" if skipped else "") + "。")
     if errors:
         print(f"有 {len(errors)} 列未匯入：", file=sys.stderr)
         for line in errors:
@@ -204,9 +235,11 @@ def build_parser():
     p_export.add_argument("--open-only", action="store_true", help="只匯出未結案案件")
     p_export.set_defaults(func=cmd_export)
 
-    p_import = sub.add_parser("import", help="由現有 CSV 試算表匯入")
-    p_import.add_argument("input", help="來源檔案（CSV，UTF-8）")
-    p_import.add_argument("--operator", default="csv-import", help="匯入者名稱，寫入異動紀錄")
+    p_import = sub.add_parser("import", help="由現有 Excel／CSV 匯入")
+    p_import.add_argument("input", help="來源檔案（.xlsx／.xlsm／.csv）")
+    p_import.add_argument("--sheet", help="指定工作表名稱（預設取第一個）")
+    p_import.add_argument("--dry-run", action="store_true", help="只試算並列出結果，不寫入")
+    p_import.add_argument("--operator", default="import", help="匯入者名稱，寫入異動紀錄")
     p_import.add_argument("--no-update", action="store_true", help="已存在的案件編號不覆寫")
     p_import.set_defaults(func=cmd_import)
 
