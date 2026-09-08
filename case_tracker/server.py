@@ -9,7 +9,7 @@ from datetime import date
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import __version__, db, export, importer, models, report
+from . import __version__, db, export, importer, models, report, template
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
@@ -347,6 +347,12 @@ class Handler(BaseHTTPRequestHandler):
                     ".spreadsheetml.sheet"
                 )
                 filename = f"案件清單_{stamp}.xlsx"
+        elif path == "/export/template.xlsx":
+            body = template.build()
+            mime = (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            filename = "案件匯入範本.xlsx"
         elif path in ("/export/weekly.csv", "/export/weekly.xlsx", "/export/weekly.txt"):
             summary = report.weekly_summary(conn, today, self._window_days(query))
             if path.endswith(".csv"):

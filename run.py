@@ -8,6 +8,7 @@
     python3 run.py export 案件清單.xlsx    # 匯出全部案件（.xlsx 或 .csv）
     python3 run.py import 既有清單.xlsx    # 由現有 Excel／CSV 匯入
     python3 run.py import 清單.xlsx --dry-run   # 只試算不寫入
+    python3 run.py template              # 產生空白的匯入範本 Excel
     python3 run.py seed-demo             # 寫入示範資料（僅限空資料庫）
 """
 
@@ -19,7 +20,9 @@ import threading
 import webbrowser
 from datetime import date, timedelta
 
-from case_tracker import __version__, db, export, importer, models, report, server
+from case_tracker import (
+    __version__, db, export, importer, models, report, server, template,
+)
 
 DEFAULT_DB = os.environ.get(
     "CASE_TRACKER_DB",
@@ -174,6 +177,17 @@ DEMO_CASES = [
 ]
 
 
+def cmd_template(args):
+    output = args.output or "案件匯入範本.xlsx"
+    if not output.lower().endswith(".xlsx"):
+        output += ".xlsx"
+    with open(output, "wb") as handle:
+        handle.write(template.build())
+    print(f"已產生匯入範本：{output}")
+    print("　第一個工作表「案件清單」直接填，第二個工作表有逐欄說明與範例。")
+    return 0
+
+
 def cmd_seed_demo(args):
     db.configure(args.db)
     conn = db.connect()
@@ -242,6 +256,10 @@ def build_parser():
     p_import.add_argument("--operator", default="import", help="匯入者名稱，寫入異動紀錄")
     p_import.add_argument("--no-update", action="store_true", help="已存在的案件編號不覆寫")
     p_import.set_defaults(func=cmd_import)
+
+    p_template = sub.add_parser("template", help="產生空白的匯入範本 Excel")
+    p_template.add_argument("output", nargs="?", help="輸出檔名（預設 案件匯入範本.xlsx）")
+    p_template.set_defaults(func=cmd_template)
 
     p_seed = sub.add_parser("seed-demo", help="寫入示範資料")
     p_seed.add_argument("--force", action="store_true", help="即使資料庫非空也寫入")

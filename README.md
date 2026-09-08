@@ -94,6 +94,11 @@ python3 run.py seed-demo       # 想先看看畫面，可寫入 7 筆示範資�
 
 ### 匯入既有 Excel／CSV
 
+**沒有現成表格？** 匯入視窗右上角有「下載空白範本」，或用命令列
+`python3 run.py template`。範本第一個工作表是要填的表格（案件類型、目前階段、
+狀態三欄有下拉選單），第二個工作表有逐欄說明與填寫範例；資料工作表刻意留空，
+不會有人忘了刪範例列就整份匯進來。
+
 **在網頁上匯入（建議）**：按工具列的「匯入 Excel／CSV」→ 選檔 →
 畫面會顯示**預覽**（每一列會新增還是更新、哪幾列有問題、對應到哪些欄位）→
 確認無誤再按「確認匯入」。預覽階段不會動到資料庫。
@@ -115,6 +120,7 @@ python3 run.py seed-demo       # 想先看看畫面，可寫入 7 筆示範資�
 命令列也可以，適合大批次或排程：
 
 ```bash
+python3 run.py template                       # 產生空白範本
 python3 run.py import 既有清單.xlsx --dry-run   # 只試算，不寫入
 python3 run.py import 既有清單.xlsx             # 實際匯入
 python3 run.py import 清單.xlsx --sheet 2026年度  # 指定工作表
@@ -231,6 +237,7 @@ case_tracker/
   xlsx_reader.py            XLSX 讀取器（zipfile + XML，不需 openpyxl）
   report.py                 到期／逾期摘要
   importer.py               Excel／CSV 匯入：表頭偵測、欄名對應、預覽與寫入
+  template.py               產生空白匯入範本（含下拉選單與填寫說明）
   static/                   前端頁面（index.html / style.css / app.js）
 tests/test_tracker.py       單元測試與 API 測試
 data/cases.db               資料庫（首次啟動自動建立，不納入版控）
@@ -248,6 +255,7 @@ data/cases.db               資料庫（首次啟動自動建立，不納入版�
 | GET | `/api/report/weekly?days=7` | 到期摘要 |
 | GET | `/export/cases.xlsx` `/export/cases.csv` | 匯出（吃相同篩選參數） |
 | GET | `/export/weekly.xlsx` `.csv` `.txt` | 匯出摘要 |
+| GET | `/export/template.xlsx` | 下載空白匯入範本 |
 | POST | `/api/import/preview?filename=` | 上傳檔案內容（原始位元組），回傳試算結果，不寫入 |
 | POST | `/api/import/commit?filename=` | 同上但實際寫入，可加 `sheet=`、`update_existing=0` |
 

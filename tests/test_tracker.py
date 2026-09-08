@@ -15,7 +15,9 @@ from xml.etree import ElementTree
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from case_tracker import db, export, importer, models, report, server, xlsx_reader  # noqa: E402
+from case_tracker import (  # noqa: E402
+    db, export, importer, models, report, server, template, xlsx_reader,
+)
 
 TODAY = date(2026, 9, 6)
 
@@ -496,6 +498,53 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(export._col_letter(27), "AA")
 
 
+class TemplateTests(TempDbTestCase):
+    """匯入範本必須能被本系統自己讀回來、而且範例資料要是合法的。"""
+
+    def setUp(self):
+        super().setUp()
+        self.raw = template.build()
+
+    def test_two_sheets_and_header_on_first_row(self):
+        name, names, rows = xlsx_reader.read_rows(self.raw)
+        self.assertEqual(names, [template.SHEET_DATA, template.SHEET_HELP])
+        self.assertEqual(name, template.SHEET_DATA)
+        self.assertEqual(rows[0], [label for _, label in models.FIELD_LABELS])
+
+    def test_data_sheet_is_empty_so_nothing_is_imported_by_accident(self):
+        items, info = importer.read_items(self.raw, "範本.xlsx")
+        self.assertEqual(info["header_row"], 1)
+        self.assertEqual(items, [])
+        self.assertEqual(importer.plan(self.conn, items)["totals"]["total"], 0)
+
+    def test_every_field_is_recognised_by_the_importer(self):
+        _, info = importer.read_items(self.raw, "範本.xlsx")
+        self.assertEqual(
+            [column["field"] for column in info["columns"]],
+            models.EDITABLE_FIELDS,
+        )
+        self.assertEqual(info["ignored_columns"], [])
+
+    def test_examples_in_the_help_sheet_are_valid_cases(self):
+        items, _ = importer.read_items(self.raw, "範本.xlsx", sheet=template.SHEET_HELP)
+        self.assertEqual(len(items), len(template.EXAMPLE_ROWS))
+        created, updated, skipped, errors = importer.commit(self.conn, items, "測試員")
+        self.assertEqual((created, updated, skipped, errors), (3, 0, 0, []))
+
+    def test_dropdown_options_match_the_current_field_definitions(self):
+        sheet = zipfile.ZipFile(io.BytesIO(self.raw)).read(
+            "xl/worksheets/sheet1.xml"
+        ).decode("utf-8")
+        for options in (models.CASE_TYPES, models.STAGES, models.STATUSES):
+            self.assertIn(",".join(options), sheet)
+
+    def test_every_part_is_valid_xml(self):
+        with zipfile.ZipFile(io.BytesIO(self.raw)) as archive:
+            self.assertIsNone(archive.testzip())
+            for name in archive.namelist():
+                ElementTree.fromstring(archive.read(name))
+
+
 class ImportTests(TempDbTestCase):
     def _write(self, text, name="in.csv"):
         path = os.path.join(self.tmp.name, name)
@@ -780,6 +829,15 @@ class ApiTests(TempDbTestCase):
     def test_import_without_body_is_rejected(self):
         status, payload = self._upload("/api/import/preview?filename=x.csv", b"")
         self.assertEqual(status, 400)
+
+    def test_template_download(self):
+        status, body, headers = self.request("GET", "/export/template.xlsx")
+        self.assertEqual(status, 200)
+        self.assertTrue(body.startswith(b"PK"))
+        self.assertIn("spreadsheetml", headers["Content-Type"])
+        _, names, rows = xlsx_reader.read_rows(body)
+        self.assertEqual(names, [template.SHEET_DATA, template.SHEET_HELP])
+        self.assertEqual(rows[0][0], "案件編號")
 
     def test_unknown_api_path(self):
         self.assertEqual(self.request("GET", "/api/nope")[0], 404)
