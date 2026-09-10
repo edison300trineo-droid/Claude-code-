@@ -15,7 +15,7 @@ from . import models
 EXCEL_EPOCH = date(1899, 12, 30)
 
 # 匯出欄寬（字元數），依 EXPORT_COLUMNS 順序。
-COLUMN_WIDTHS = [18, 18, 18, 22, 14, 16, 30, 12, 12, 10, 14, 46, 20, 12]
+COLUMN_WIDTHS = [18, 18, 18, 34, 22, 14, 16, 30, 12, 12, 10, 14, 46, 20, 12]
 
 
 def _cell_value(item, key):

@@ -13,13 +13,15 @@ const state = {
   editingRev: null,
   importFile: null,
   importSheet: '',
+  selected: new Set(),
+  lastPicked: null,
 };
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const FORM_FIELDS = ['case_no', 'contract_no', 'study_no', 'client', 'case_type',
-  'stage', 'next_milestone', 'due_date', 'owner', 'status', 'notes'];
+const FORM_FIELDS = ['case_no', 'contract_no', 'study_no', 'title', 'client',
+  'case_type', 'stage', 'next_milestone', 'due_date', 'owner', 'status', 'notes'];
 
 const STATUS_CLASS = {
   '進行中': 's-ongoing',
@@ -166,21 +168,24 @@ function dueCell(item) {
 function render() {
   const tbody = $('#rows');
   if (!state.items.length) {
-    tbody.innerHTML = '<tr><td colspan="13" class="empty">沒有符合條件的案件</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="15" class="empty">沒有符合條件的案件</td></tr>';
   } else {
     tbody.innerHTML = state.items.map((item) => `
-      <tr class="${rowClass(item)}" data-id="${item.id}">
+      <tr class="${rowClass(item)}${state.selected.has(item.id) ? ' picked' : ''}" data-id="${item.id}">
+        <td class="check"><input type="checkbox" data-pick="${item.id}"
+          ${state.selected.has(item.id) ? 'checked' : ''}></td>
         <td class="case-no">${escapeHtml(item.case_no)}</td>
         <td class="case-no soft">${escapeHtml(item.contract_no) || '—'}</td>
         <td class="case-no">${escapeHtml(item.study_no) || '—'}</td>
-        <td>${escapeHtml(item.client)}</td>
-        <td>${escapeHtml(item.case_type)}</td>
+        <td class="title" title="${escapeAttr(item.title)}">${escapeHtml(item.title)}</td>
+        <td class="nowrap">${escapeHtml(item.client)}</td>
+        <td class="nowrap">${escapeHtml(item.case_type)}</td>
         <td class="stage-cell"><span class="stage-idx">${stageIndex(item.stage)}</span>${escapeHtml(item.stage)}</td>
         <td>${escapeHtml(item.next_milestone)}</td>
         <td class="date">${escapeHtml(item.due_date || '—')}</td>
         <td>${dueCell(item)}</td>
-        <td>${escapeHtml(item.owner)}</td>
-        <td><span class="status ${STATUS_CLASS[item.status] || ''}">${escapeHtml(item.status)}</span></td>
+        <td class="nowrap">${escapeHtml(item.owner)}</td>
+        <td class="nowrap"><span class="status ${STATUS_CLASS[item.status] || ''}">${escapeHtml(item.status)}</span></td>
         <td class="notes" title="${escapeAttr(item.notes)}">${escapeHtml(item.notes)}</td>
         <td class="act">
           <button class="link-btn" data-edit="${item.id}">編輯</button>
@@ -203,6 +208,8 @@ function render() {
     banner.hidden = true;
   }
 
+  syncSelection();
+
   $$('#ledger th.sortable').forEach((th) => {
     const mark = th.querySelector('.arrow');
     if (mark) mark.remove();
@@ -219,6 +226,82 @@ function updateExportLinks() {
   const params = filterParams().toString();
   $('#export-csv').href = `/export/cases.csv?${params}`;
   $('#export-xlsx').href = `/export/cases.xlsx?${params}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* 批次勾選                                                             */
+/* ------------------------------------------------------------------ */
+
+function visibleIds() {
+  return state.items.map((item) => item.id);
+}
+
+function syncSelection() {
+  // 篩選或重新載入後，已經看不到的案件不再算在勾選內。
+  const visible = new Set(visibleIds());
+  Array.from(state.selected).forEach((id) => {
+    if (!visible.has(id)) state.selected.delete(id);
+  });
+
+  const count = state.selected.size;
+  $('#selection-bar').hidden = count === 0;
+  $('#selection-count').textContent = `已勾選 ${count} 件`;
+
+  const all = $('#check-all');
+  all.checked = count > 0 && count === state.items.length;
+  all.indeterminate = count > 0 && count < state.items.length;
+}
+
+function setPicked(id, picked) {
+  if (picked) state.selected.add(id);
+  else state.selected.delete(id);
+  const row = $(`#rows tr[data-id="${id}"]`);
+  if (row) {
+    row.classList.toggle('picked', picked);
+    const box = row.querySelector('[data-pick]');
+    if (box) box.checked = picked;
+  }
+}
+
+function pickRange(fromId, toId, picked) {
+  const ids = visibleIds();
+  const start = ids.indexOf(fromId);
+  const end = ids.indexOf(toId);
+  if (start < 0 || end < 0) return;
+  const [low, high] = start <= end ? [start, end] : [end, start];
+  for (let i = low; i <= high; i += 1) setPicked(ids[i], picked);
+}
+
+function clearSelection() {
+  state.selected.clear();
+  state.lastPicked = null;
+  render();
+}
+
+async function bulkDelete() {
+  const ids = visibleIds().filter((id) => state.selected.has(id));
+  if (!ids.length) return;
+
+  const picked = state.items.filter((item) => ids.includes(item.id));
+  const preview = picked.slice(0, 10).map((item) => item.case_no).join('\n');
+  const more = picked.length > 10 ? `\n…等共 ${picked.length} 件` : '';
+  if (!window.confirm(
+    `確定刪除以下 ${picked.length} 件案件？此動作無法復原。\n\n${preview}${more}`
+  )) return;
+
+  try {
+    const result = await api('/api/cases/bulk-delete', {
+      method: 'POST',
+      body: { ids },
+    });
+    toast(`已刪除 ${result.deleted} 件案件`);
+    state.selected.clear();
+    state.lastPicked = null;
+    await loadMeta();
+    await loadCases();
+  } catch (err) {
+    toast(err.message, true);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -304,7 +387,7 @@ function reportTable(cases) {
   if (!cases.length) return '<div class="empty">（無）</div>';
   return `<table>
     <thead><tr>
-      <th class="col-no">案件編號</th><th class="col-no2">研究編號</th><th>客戶名稱</th><th>類型</th>
+      <th class="col-no">案件編號</th><th class="col-no2">研究編號</th><th class="col-title">案件名稱</th><th>客戶名稱</th><th>類型</th>
       <th>下一個里程碑</th><th class="col-date">到期日</th><th class="col-due">期限</th>
       <th>負責人</th><th>狀態</th>
     </tr></thead>
@@ -312,13 +395,14 @@ function reportTable(cases) {
       <tr class="${rowClass(c)}">
         <td class="case-no">${escapeHtml(c.case_no)}</td>
         <td class="case-no">${escapeHtml(c.study_no) || '—'}</td>
-        <td>${escapeHtml(c.client)}</td>
-        <td>${escapeHtml(c.case_type)}</td>
+        <td class="title">${escapeHtml(c.title)}</td>
+        <td class="nowrap">${escapeHtml(c.client)}</td>
+        <td class="nowrap">${escapeHtml(c.case_type)}</td>
         <td>${escapeHtml(c.next_milestone || c.stage)}</td>
         <td class="date">${escapeHtml(c.due_date || '—')}</td>
         <td>${dueCell(c)}</td>
-        <td>${escapeHtml(c.owner)}</td>
-        <td><span class="status ${STATUS_CLASS[c.status] || ''}">${escapeHtml(c.status)}</span></td>
+        <td class="nowrap">${escapeHtml(c.owner)}</td>
+        <td class="nowrap"><span class="status ${STATUS_CLASS[c.status] || ''}">${escapeHtml(c.status)}</span></td>
       </tr>`).join('')}</tbody></table>`;
 }
 
@@ -529,10 +613,32 @@ function bind() {
     });
   });
 
+  $('#check-all').addEventListener('change', (event) => {
+    if (event.target.checked) visibleIds().forEach((id) => setPicked(id, true));
+    else state.selected.clear();
+    render();
+  });
+
+  $('#btn-bulk-delete').addEventListener('click', bulkDelete);
+  $('#btn-clear-selection').addEventListener('click', clearSelection);
+
   $('#btn-new').addEventListener('click', () => openCaseForm(null));
   $('#case-form').addEventListener('submit', submitCase);
 
   $('#rows').addEventListener('click', (event) => {
+    const pickId = event.target.dataset.pick;
+    if (pickId) {
+      const id = Number(pickId);
+      const picked = event.target.checked;
+      if (event.shiftKey && state.lastPicked !== null) {
+        pickRange(state.lastPicked, id, picked);
+      } else {
+        setPicked(id, picked);
+      }
+      state.lastPicked = id;
+      syncSelection();
+      return;
+    }
     const editId = event.target.dataset.edit;
     const delId = event.target.dataset.del;
     if (editId) openCaseForm(state.items.find((i) => i.id === Number(editId)));
@@ -540,6 +646,7 @@ function bind() {
   });
 
   $('#rows').addEventListener('dblclick', (event) => {
+    if (event.target.dataset.pick) return;
     const row = event.target.closest('tr[data-id]');
     if (row) openCaseForm(state.items.find((i) => i.id === Number(row.dataset.id)));
   });

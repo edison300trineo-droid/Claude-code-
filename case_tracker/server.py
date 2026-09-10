@@ -15,6 +15,7 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 MAX_BODY = 1 * 1024 * 1024  # 1 MB，足夠單筆案件
 MAX_UPLOAD = 20 * 1024 * 1024  # 匯入用的 Excel／CSV 上限
+MAX_BULK = 500  # 單次批次操作的筆數上限
 
 CASE_ID_RE = re.compile(r"^/api/cases/(\d+)$")
 CASE_HISTORY_RE = re.compile(r"^/api/cases/(\d+)/history$")
@@ -247,6 +248,29 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(case, status=HTTPStatus.CREATED)
                 return
             raise ApiError(HTTPStatus.METHOD_NOT_ALLOWED, "不支援的方法")
+
+        if path == "/api/cases/bulk-delete":
+            if method != "POST":
+                raise ApiError(HTTPStatus.METHOD_NOT_ALLOWED, "不支援的方法")
+            payload = self._read_json()
+            operator = self._operator(query, payload)
+            raw_ids = payload.get("ids")
+            if not isinstance(raw_ids, list) or not raw_ids:
+                raise ApiError(HTTPStatus.BAD_REQUEST, "請選擇要刪除的案件")
+            if len(raw_ids) > MAX_BULK:
+                raise ApiError(
+                    HTTPStatus.BAD_REQUEST,
+                    f"一次最多刪除 {MAX_BULK} 筆，請分批處理",
+                )
+            try:
+                case_ids = [int(value) for value in raw_ids]
+            except (TypeError, ValueError):
+                raise ApiError(HTTPStatus.BAD_REQUEST, "案件編號清單格式錯誤")
+            deleted, missing = db.delete_cases(conn, case_ids, operator)
+            self._send_json(
+                {"deleted": len(deleted), "case_nos": deleted, "missing": missing}
+            )
+            return
 
         match = CASE_HISTORY_RE.match(path)
         if match and method == "GET":

@@ -13,7 +13,7 @@ from datetime import datetime
 
 from . import models
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _local = threading.local()
 _db_path = None
@@ -81,6 +81,7 @@ def init_schema(conn):
                 case_no        TEXT NOT NULL COLLATE NOCASE,
                 contract_no    TEXT NOT NULL DEFAULT '',
                 study_no       TEXT NOT NULL DEFAULT '',
+                title          TEXT NOT NULL DEFAULT '',
                 client         TEXT NOT NULL DEFAULT '',
                 case_type      TEXT NOT NULL,
                 stage          TEXT NOT NULL,
@@ -119,9 +120,12 @@ def init_schema(conn):
 
 
 def _migrate(conn):
-    """為既有資料庫補上後來新增的欄位（v1 -> v2：合約編號、研究編號）。"""
+    """為既有資料庫補上後來新增的欄位。
+
+    v1 -> v2：合約編號、研究編號；v2 -> v3：案件名稱。
+    """
     existing = {row["name"] for row in conn.execute("PRAGMA table_info(cases)")}
-    for column in ("contract_no", "study_no"):
+    for column in ("contract_no", "study_no", "title"):
         if column not in existing:
             conn.execute(
                 f"ALTER TABLE cases ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
@@ -140,6 +144,7 @@ def _migrate(conn):
 
 SORT_COLUMNS = {
     "case_no": "case_no",
+    "title": "title",
     "contract_no": "contract_no",
     "study_no": "study_no",
     "client": "client",
@@ -184,9 +189,9 @@ def _build_filters(filters):
         like = f"%{query}%"
         where.append(
             "(case_no LIKE ? OR contract_no LIKE ? OR study_no LIKE ?"
-            " OR client LIKE ?)"
+            " OR title LIKE ? OR client LIKE ?)"
         )
-        params.extend([like] * 4)
+        params.extend([like] * 5)
 
     if filters.get("open_only"):
         where.append("status <> ?")
@@ -281,13 +286,13 @@ def create_case(conn, payload, operator=""):
         if exists:
             raise DuplicateCaseNo(f"案件編號 {data['case_no']} 已存在")
         cursor = conn.execute(
-            "INSERT INTO cases (case_no, contract_no, study_no, client, case_type,"
-            " stage, next_milestone, due_date, owner, status, notes, rev,"
-            " created_at, created_by, updated_at, updated_by)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
+            "INSERT INTO cases (case_no, contract_no, study_no, title, client,"
+            " case_type, stage, next_milestone, due_date, owner, status, notes,"
+            " rev, created_at, created_by, updated_at, updated_by)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
             (
                 data["case_no"], data["contract_no"], data["study_no"],
-                data["client"], data["case_type"], data["stage"],
+                data["title"], data["client"], data["case_type"], data["stage"],
                 data["next_milestone"], data["due_date"], data["owner"],
                 data["status"], data["notes"], stamp, operator, stamp, operator,
             ),
@@ -343,6 +348,28 @@ def delete_case(conn, case_id, operator=""):
         conn.execute("DELETE FROM cases WHERE id = ?", (case_id,))
         _log(conn, case_id, row["case_no"], "delete", "", row["case_no"], "", operator, stamp)
     return dict(row)
+
+
+def delete_cases(conn, case_ids, operator=""):
+    """一次刪除多筆，同一個交易內完成（全成或全不成）。
+
+    回傳 (已刪除的案件編號, 找不到的 id)。
+    """
+    stamp = now_stamp()
+    deleted, missing = [], []
+    with _write_lock, conn:
+        for case_id in case_ids:
+            row = conn.execute(
+                "SELECT * FROM cases WHERE id = ?", (case_id,)
+            ).fetchone()
+            if row is None:
+                missing.append(case_id)
+                continue
+            conn.execute("DELETE FROM cases WHERE id = ?", (case_id,))
+            _log(conn, case_id, row["case_no"], "delete", "", row["case_no"], "",
+                 operator, stamp)
+            deleted.append(row["case_no"])
+    return deleted, missing
 
 
 def history(conn, case_id, limit=200):

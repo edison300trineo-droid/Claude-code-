@@ -8,6 +8,7 @@ REPORT_COLUMNS = [
     ("bucket", "分類"),
     ("case_no", "案件編號"),
     ("study_no", "研究編號"),
+    ("title", "案件名稱"),
     ("client", "客戶名稱"),
     ("case_type", "案件類型"),
     ("stage", "目前階段"),
@@ -18,7 +19,7 @@ REPORT_COLUMNS = [
     ("status", "狀態"),
 ]
 
-REPORT_WIDTHS = [12, 18, 18, 22, 14, 16, 30, 12, 14, 12, 10]
+REPORT_WIDTHS = [12, 18, 18, 34, 22, 14, 16, 30, 12, 14, 12, 10]
 
 
 def weekly_summary(conn, today=None, days=models.DUE_SOON_DAYS):

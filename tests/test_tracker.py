@@ -27,6 +27,7 @@ def sample(**overrides):
         "case_no": "QT114001",
         "contract_no": "C-114-021",
         "study_no": "TMT-114-003",
+        "title": "SD 大鼠 28 天重複劑量毒性試驗",
         "client": "宏碩生技",
         "case_type": "GLP 研究",
         "stage": "試驗執行中",
@@ -153,7 +154,7 @@ class XlsxReaderTests(unittest.TestCase):
         _, _, rows = xlsx_reader.read_rows(raw)
         self.assertEqual(rows[0][0], "案件編號")
         self.assertEqual(rows[1][0], "QT114001")
-        self.assertEqual(rows[1][7], "2026-09-20")  # 到期日欄還原成日期
+        self.assertEqual(rows[1][8], "2026-09-20")  # 到期日欄還原成日期
 
 
 class TempDbTestCase(unittest.TestCase):
@@ -271,6 +272,7 @@ class MigrationTests(unittest.TestCase):
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(cases)")}
         self.assertIn("contract_no", columns)
         self.assertIn("study_no", columns)
+        self.assertIn("title", columns)
         existing = db.get_by_case_no(conn, "QT114001")
         self.assertEqual(existing["contract_no"], "")
 
@@ -285,6 +287,63 @@ class MigrationTests(unittest.TestCase):
         )
         self.assertEqual(updated["contract_no"], "C-114-021")
         self.assertEqual(updated["study_no"], "TMT-114-003")
+
+
+class TitleFieldTests(TempDbTestCase):
+    def test_title_is_optional_and_trimmed(self):
+        clean = models.validate(sample(title="  小鼠急性藥效評估 "))
+        self.assertEqual(clean["title"], "小鼠急性藥效評估")
+        self.assertEqual(models.validate(sample(title=""))["title"], "")
+
+    def test_title_length_is_capped(self):
+        with self.assertRaises(models.ValidationError):
+            models.validate(sample(title="長" * 201))
+
+    def test_title_is_stored_and_searchable(self):
+        db.create_case(self.conn, sample(case_no="QT114901", title="血漿檢體前導分析"))
+        db.create_case(self.conn, sample(case_no="QT114902", title="小鼠急性藥效評估"))
+        found = db.list_cases(self.conn, {"q": "前導"})
+        self.assertEqual([c["case_no"] for c in found], ["QT114901"])
+
+    def test_title_can_be_sorted_on(self):
+        db.create_case(self.conn, sample(case_no="QT114901", title="乙案"))
+        db.create_case(self.conn, sample(case_no="QT114902", title="甲案"))
+        order = [c["title"] for c in db.list_cases(self.conn, {"sort": "title"})]
+        self.assertEqual(order, ["乙案", "甲案"])
+
+    def test_title_appears_in_exports(self):
+        raw = export.to_csv([models.decorate(sample(), TODAY)]).decode("utf-8-sig")
+        self.assertIn("SD 大鼠 28 天重複劑量毒性試驗", raw)
+
+
+class BulkDeleteTests(TempDbTestCase):
+    def setUp(self):
+        super().setUp()
+        self.ids = [
+            db.create_case(self.conn, sample(case_no=f"QT11500{n}"))["id"]
+            for n in range(1, 5)
+        ]
+
+    def test_deletes_several_cases_at_once(self):
+        deleted, missing = db.delete_cases(self.conn, self.ids[:3], "測試員")
+        self.assertEqual(len(deleted), 3)
+        self.assertEqual(missing, [])
+        self.assertEqual(len(db.list_cases(self.conn, {})), 1)
+
+    def test_reports_ids_that_no_longer_exist(self):
+        db.delete_case(self.conn, self.ids[0])
+        deleted, missing = db.delete_cases(self.conn, self.ids[:2], "測試員")
+        self.assertEqual(len(deleted), 1)
+        self.assertEqual(missing, [self.ids[0]])
+
+    def test_each_deletion_is_recorded(self):
+        db.delete_cases(self.conn, self.ids[:2], "測試員")
+        actions = [
+            entry for entry in db.recent_activity(self.conn)
+            if entry["action"] == "delete"
+        ]
+        self.assertEqual(len(actions), 2)
+        self.assertTrue(all(entry["operator"] == "測試員" for entry in actions))
 
 
 class CaseTypeTests(unittest.TestCase):
@@ -464,7 +523,7 @@ class ExportTests(unittest.TestCase):
         raw = export.to_csv(self.items)
         self.assertTrue(raw.startswith(b"\xef\xbb\xbf"))
         text = raw.decode("utf-8-sig")
-        self.assertTrue(text.startswith("案件編號,合約編號,研究編號,客戶名稱"))
+        self.assertTrue(text.startswith("案件編號,合約編號,研究編號,案件名稱,客戶名稱"))
         self.assertIn("QT114001", text)
         self.assertIn("TMT-114-003", text)
 
@@ -535,6 +594,11 @@ class TemplateTests(TempDbTestCase):
         self.assertEqual(len(items), len(template.EXAMPLE_ROWS))
         created, updated, skipped, errors = importer.commit(self.conn, items, "測試員")
         self.assertEqual((created, updated, skipped, errors), (3, 0, 0, []))
+
+    def test_column_widths_and_examples_match_the_field_list(self):
+        self.assertEqual(len(template.COLUMN_WIDTHS), len(template.COLUMNS))
+        for row in template.EXAMPLE_ROWS:
+            self.assertEqual(len(row), len(template.COLUMNS))
 
     def test_dropdown_options_match_the_current_field_definitions(self):
         sheet = zipfile.ZipFile(io.BytesIO(self.raw)).read(
@@ -898,6 +962,39 @@ class ApiTests(TempDbTestCase):
         _, names, rows = xlsx_reader.read_rows(body)
         self.assertEqual(names, [template.SHEET_DATA, template.SHEET_HELP])
         self.assertEqual(rows[0][0], "案件編號")
+
+    def test_bulk_delete(self):
+        ids = []
+        for n in range(1, 4):
+            status, case = self.json_request("POST", "/api/cases", sample(case_no=f"QT11510{n}"))
+            ids.append(case["id"])
+
+        status, result = self.json_request(
+            "POST", "/api/cases/bulk-delete", {"ids": ids[:2]}
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(result["deleted"], 2)
+        self.assertEqual(result["missing"], [])
+        self.assertEqual(self.json_request("GET", "/api/cases")[1]["count"], 1)
+
+    def test_bulk_delete_rejects_empty_and_oversized_lists(self):
+        self.assertEqual(
+            self.json_request("POST", "/api/cases/bulk-delete", {"ids": []})[0], 400
+        )
+        status, payload = self.json_request(
+            "POST", "/api/cases/bulk-delete", {"ids": list(range(600))}
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("500", payload["error"])
+
+    def test_bulk_delete_rejects_bad_ids(self):
+        status, _ = self.json_request(
+            "POST", "/api/cases/bulk-delete", {"ids": ["abc"]}
+        )
+        self.assertEqual(status, 400)
+
+    def test_bulk_delete_only_accepts_post(self):
+        self.assertEqual(self.request("GET", "/api/cases/bulk-delete")[0], 405)
 
     def test_unknown_api_path(self):
         self.assertEqual(self.request("GET", "/api/nope")[0], 404)

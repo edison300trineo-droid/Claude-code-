@@ -41,6 +41,7 @@ FIELD_LABELS = [
     ("case_no", "案件編號"),
     ("contract_no", "合約編號"),
     ("study_no", "研究編號"),
+    ("title", "案件名稱"),
     ("client", "客戶名稱"),
     ("case_type", "案件類型"),
     ("stage", "目前階段"),
@@ -53,7 +54,8 @@ FIELD_LABELS = [
 
 EDITABLE_FIELDS = [name for name, _ in FIELD_LABELS]
 
-EXPORT_COLUMNS = FIELD_LABELS[:10] + [
+# 匯出欄位：所有可編輯欄位（備註移到最後），再加上衍生與異動資訊。
+EXPORT_COLUMNS = [item for item in FIELD_LABELS if item[0] != "notes"] + [
     ("due_label", "期限狀態"),
     ("notes", "備註"),
     ("updated_at", "最後更新"),
@@ -64,6 +66,7 @@ MAX_LEN = {
     "case_no": 64,
     "contract_no": 64,
     "study_no": 64,
+    "title": 200,
     "client": 120,
     "next_milestone": 200,
     "owner": 60,

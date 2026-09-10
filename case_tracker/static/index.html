@@ -28,7 +28,7 @@
   <div class="toolbar-line">
     <label class="field search">
       <span>搜尋</span>
-      <input id="search" type="search" placeholder="案件編號／合約編號／研究編號／客戶" autocomplete="off">
+      <input id="search" type="search" placeholder="案件編號／合約編號／研究編號／案件名稱／客戶" autocomplete="off">
     </label>
     <label class="field"><span>狀態</span><select id="filter-status"></select></label>
     <label class="field"><span>類型</span><select id="filter-type"></select></label>
@@ -51,13 +51,22 @@
 
 <main>
   <div id="banner" class="banner" hidden></div>
+  <div id="selection-bar" class="selection-bar" hidden>
+    <span id="selection-count" class="mono"></span>
+    <button id="btn-bulk-delete" class="btn danger" type="button">刪除勾選的案件</button>
+    <button id="btn-clear-selection" class="btn ghost" type="button">清除勾選</button>
+    <span class="spacer"></span>
+    <span class="muted">提示：先勾一列，再按住 Shift 勾另一列，可整段選取</span>
+  </div>
   <div class="table-wrap">
     <table id="ledger">
       <thead>
         <tr>
+          <th class="col-check"><input id="check-all" type="checkbox" title="全選目前顯示的案件"></th>
           <th class="col-no sortable" data-sort="case_no">案件編號</th>
           <th class="col-no2 sortable" data-sort="contract_no">合約編號</th>
           <th class="col-no2 sortable" data-sort="study_no">研究編號</th>
+          <th class="col-title sortable" data-sort="title">案件名稱</th>
           <th class="sortable" data-sort="client">客戶名稱</th>
           <th class="sortable" data-sort="case_type">類型</th>
           <th class="sortable" data-sort="stage">目前階段</th>
@@ -93,6 +102,9 @@
       </label>
       <label class="f-half">客戶名稱
         <input name="client" maxlength="120" list="client-list">
+      </label>
+      <label class="f-full">案件名稱
+        <input name="title" maxlength="200" placeholder="例：SD 大鼠 28 天重複劑量毒性試驗">
       </label>
       <label class="f-half">合約編號
         <input name="contract_no" class="mono" maxlength="64" list="contract-list"
